@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cloudflare Route 配置生成器</title>
+    <style>
+      :root { font-family: system-ui, sans-serif; color: #172033; background: #f5f7fa; }
+      * { box-sizing: border-box; }
+      body { max-width: 720px; margin: 0 auto; padding: 32px 18px; }
+      section { margin-bottom: 20px; padding: 24px; border: 1px solid #dfe5ed; border-radius: 14px; background: white; }
+      h1 { margin: 0 0 8px; font-size: 26px; }
+      h2 { margin-top: 0; font-size: 18px; }
+      p { color: #667085; line-height: 1.6; }
+      label { display: block; margin-bottom: 8px; font-weight: 700; }
+      input, textarea, button { width: 100%; border-radius: 9px; font: inherit; }
+      input, textarea { padding: 11px 12px; border: 1px solid #cbd5e1; }
+      textarea { min-height: 92px; margin-top: 12px; resize: vertical; font-family: ui-monospace, monospace; font-size: 12px; }
+      button { margin-top: 12px; padding: 12px; border: 0; color: white; background: #172033; cursor: pointer; font-weight: 700; }
+      button.secondary { color: #172033; background: #e9edf3; }
+      .status { min-height: 22px; margin: 8px 0 0; color: #166534; font-size: 13px; }
+      .status[data-error="true"] { color: #b42318; }
+      .field + .field { margin-top: 14px; }
+    </style>
+  </head>
+  <body>
+    <h1>Cloudflare Route 配置生成器</h1>
+    <p>此页面完全在本地浏览器运行，不发送网络请求。不要把生成结果保存到公开仓库。</p>
+
+    <section>
+      <h2>会话密钥</h2>
+      <p>首次部署先生成一次；所有项目共同使用该密钥。</p>
+      <button id="secret-button" type="button">生成会话密钥</button>
+      <textarea id="secret-output" readonly placeholder="ROUTE_SESSION_SECRET"></textarea>
+      <button class="secondary" data-copy="secret-output" type="button">复制会话密钥</button>
+      <p class="status" id="secret-status" role="status"></p>
+    </section>
+
+    <section>
+      <h2>项目密码散列</h2>
+      <p>每个项目使用独立密码，但必须填写线上使用的同一个会话密钥。</p>
+      <label for="password">项目访问密码</label>
+      <input id="password" type="password" maxlength="256" autocomplete="new-password">
+      <div class="field">
+        <label for="hash-secret">ROUTE_SESSION_SECRET</label>
+        <input id="hash-secret" type="password" autocomplete="off">
+      </div>
+      <button id="hash-button" type="button">生成 Worker 密码散列</button>
+      <textarea id="hash-output" readonly placeholder="生成结果以 hmac-sha256$ 开头"></textarea>
+      <button class="secondary" data-copy="hash-output" type="button">复制散列</button>
+      <p class="status" id="hash-status" role="status"></p>
+    </section>
+
+    <section>
+      <h2>验证现有配置</h2>
+      <p>配置和密码只在本页内存中处理，不会发送到网络。</p>
+      <div class="field">
+        <label for="verify-hostname">正在访问的完整域名</label>
+        <input id="verify-hostname" type="text" placeholder="license.demo.example.com" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="verify-base-domain">ROUTE_BASE_DOMAIN</label>
+        <input id="verify-base-domain" type="text" placeholder="demo.example.com" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="verify-projects">ROUTE_PROJECTS_JSON 的 Value</label>
+        <textarea id="verify-projects" placeholder='{"license":{"target":"https://project.vercel.app","passwordHash":"hmac-sha256$..."}}'></textarea>
+      </div>
+      <div class="field">
+        <label for="verify-password">本次输入的明文密码</label>
+        <input id="verify-password" type="password" maxlength="256" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="verify-secret">ROUTE_SESSION_SECRET</label>
+        <input id="verify-secret" type="password" autocomplete="off">
+      </div>
+      <button id="verify-button" type="button">检查域名、路由和密码</button>
+      <p class="status" id="verify-status" role="status"></p>
+    </section>
+
+    <script>
+      const encoder = new TextEncoder();
+
+      document.querySelector('#hash-button').addEventListener('click', async () => {
+        const password = document.querySelector('#password').value;
+        const status = document.querySelector('#hash-status');
+
+        if (!password || password.length > 256) {
+          status.textContent = '请输入 1–256 个字符的密码。';
+          return;
+        }
+
+        const secret = document.querySelector('#hash-secret').value;
+
+        if (secret.length < 32) {
+          status.textContent = '请填写至少 32 个字符的 ROUTE_SESSION_SECRET。';
+          return;
+        }
+
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const digest = await passwordDigest(password, salt, secret);
+        document.querySelector('#hash-output').value = [
+          'hmac-sha256',
+          toBase64Url(salt),
+          toBase64Url(digest)
+        ].join('$');
+        status.textContent = '已生成。';
+      });
+
+      document.querySelector('#secret-button').addEventListener('click', () => {
+        const secret = crypto.getRandomValues(new Uint8Array(48));
+        const encoded = toBase64Url(secret);
+        document.querySelector('#secret-output').value = encoded;
+        document.querySelector('#hash-secret').value = encoded;
+        document.querySelector('#verify-secret').value = encoded;
+        document.querySelector('#secret-status').textContent = '已生成。';
+      });
+
+      document.querySelector('#verify-button').addEventListener('click', async () => {
+        const status = document.querySelector('#verify-status');
+        status.dataset.error = 'true';
+        status.textContent = '正在检查…';
+
+        try {
+          const hostname = parseHostname(document.querySelector('#verify-hostname').value);
+          const baseDomain = parseBaseDomain(document.querySelector('#verify-base-domain').value);
+          const projects = parseProjects(document.querySelector('#verify-projects').value);
+          const aliases = Object.keys(projects);
+          let alias;
+
+          if (baseDomain) {
+            if (!hostname.endsWith(`.${baseDomain}`)) {
+              throw new Error(`访问域名不属于 ROUTE_BASE_DOMAIN：${baseDomain}`);
+            }
+
+            alias = hostname.slice(0, -(baseDomain.length + 1));
+          } else if (aliases.length === 1) {
+            [alias] = aliases;
+          } else {
+            throw new Error('多项目配置必须填写 ROUTE_BASE_DOMAIN。');
+          }
+
+          const project = projects[alias];
+
+          if (!project) {
+            throw new Error(`域名前缀“${alias}”在 ROUTE_PROJECTS_JSON 中不存在。`);
+          }
+
+          const password = document.querySelector('#verify-password').value;
+          const secret = document.querySelector('#verify-secret').value;
+          const matches = await verifyPassword(password, project.passwordHash, secret);
+
+          if (!matches) {
+            throw new Error(`域名已匹配项目“${alias}”，但密码与 passwordHash 不匹配。`);
+          }
+
+          status.dataset.error = 'false';
+          status.textContent = `检查通过：域名匹配项目“${alias}”，密码散列有效。`;
+        } catch (error) {
+          status.textContent = error.message;
+        }
+      });
+
+      for (const button of document.querySelectorAll('[data-copy]')) {
+        button.addEventListener('click', async () => {
+          const output = document.querySelector(`#${button.dataset.copy}`);
+
+          if (!output.value) return;
+
+          try {
+            await navigator.clipboard.writeText(output.value);
+          } catch {
+            output.select();
+            document.execCommand('copy');
+          }
+
+          button.textContent = '已复制';
+          window.setTimeout(() => {
+            button.textContent = button.dataset.copy === 'hash-output'
+              ? '复制散列'
+              : '复制会话密钥';
+          }, 1200);
+        });
+      }
+
+      function toBase64Url(bytes) {
+        let binary = '';
+        for (const byte of bytes) binary += String.fromCharCode(byte);
+        return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+      }
+
+      function fromBase64Url(value) {
+        const normalized = String(value || '').replaceAll('-', '+').replaceAll('_', '/');
+        const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+        const binary = atob(padded);
+        return Uint8Array.from(binary, character => character.charCodeAt(0));
+      }
+
+      function parseHostname(rawValue) {
+        const value = rawValue.trim().toLowerCase();
+
+        if (!value) throw new Error('请填写正在访问的完整域名。');
+
+        try {
+          return new URL(value.includes('://') ? value : `https://${value}`).hostname;
+        } catch {
+          throw new Error('访问域名格式无效。');
+        }
+      }
+
+      function parseBaseDomain(rawValue) {
+        const value = rawValue.trim().toLowerCase();
+
+        if (!value) return '';
+
+        if (value.includes('://') || value.includes('/') || value.includes('*')) {
+          throw new Error('ROUTE_BASE_DOMAIN 只能填写域名，不能包含协议、路径或通配符。');
+        }
+
+        return value;
+      }
+
+      function parseProjects(rawValue) {
+        let projects;
+
+        try {
+          projects = JSON.parse(rawValue);
+        } catch {
+          throw new Error('ROUTE_PROJECTS_JSON 不是有效 JSON；Value 中不要包含变量名或外层引号。');
+        }
+
+        if (!projects || Array.isArray(projects) || typeof projects !== 'object') {
+          throw new Error('ROUTE_PROJECTS_JSON 必须是项目对象。');
+        }
+
+        return projects;
+      }
+
+      async function verifyPassword(password, encodedHash, secret) {
+        if (!password || password.length > 256) {
+          throw new Error('请输入本次用于登录的明文密码。');
+        }
+
+        if (secret.length < 32) {
+          throw new Error('请填写当前 Worker 使用的 ROUTE_SESSION_SECRET。');
+        }
+
+        const [prefix, saltText, hashText, ...extra] = String(encodedHash || '').split('$');
+
+        if (
+          prefix !== 'hmac-sha256' ||
+          extra.length
+        ) {
+          throw new Error('passwordHash 格式无效，必须是完整的 hmac-sha256$... 散列。');
+        }
+
+        let salt;
+        let expected;
+
+        try {
+          salt = fromBase64Url(saltText);
+          expected = fromBase64Url(hashText);
+        } catch {
+          throw new Error('passwordHash 的 Base64URL 内容无效。');
+        }
+
+        if (salt.length < 16 || expected.length !== 32) {
+          throw new Error('passwordHash 被截断或包含无效长度。');
+        }
+
+        const actual = await passwordDigest(password, salt, secret);
+        let difference = 0;
+
+        for (let index = 0; index < actual.length; index += 1) {
+          difference |= actual[index] ^ expected[index];
+        }
+
+        return difference === 0;
+      }
+
+      async function passwordDigest(password, salt, secret) {
+        const key = await crypto.subtle.importKey(
+          'raw',
+          encoder.encode(secret),
+          { name: 'HMAC', hash: 'SHA-256' },
+          false,
+          ['sign']
+        );
+        const message = `route-password-v1\0${toBase64Url(salt)}\0${password}`;
+        return new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(message)));
+      }
+    </script>
+  </body>
+</html>

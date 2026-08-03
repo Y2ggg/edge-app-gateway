@@ -1,0 +1,23 @@
+{
+  "name": "cloudflare-vercel-route",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dashboard:build": "esbuild src/worker.js --bundle --format=esm --platform=browser --outfile=dashboard/worker.js",
+    "deploy": "wrangler deploy",
+    "deploy:check": "wrangler deploy --dry-run",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "password:hash": "node scripts/hash-worker-password.js",
+    "session:secret": "node scripts/generate-session-secret.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "wrangler": "^4.115.0"
+  }
+}

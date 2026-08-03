@@ -1,0 +1,9 @@
+node_modules/
+coverage/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+ROUTE_PROJECTS_JSON.json
+.DS_Store
+npm-debug.log*

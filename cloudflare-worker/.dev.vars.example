@@ -1,0 +1,11 @@
+# 只有一个项目且未设置 ROUTE_BASE_DOMAIN 时，Worker 自动使用这个项目。
+# 每个项目使用由本地 HTML 工具生成的 HMAC-SHA256 散列。
+ROUTE_PROJECTS_JSON={"example-a7f3":{"target":"https://your-project.vercel.app","passwordHash":"hmac-sha256$replace-with-salt$replace-with-digest","rewriteOrigins":false}}
+
+# 运行 `npm run session:secret` 生成。
+ROUTE_SESSION_SECRET=replace-with-at-least-32-random-characters
+
+ROUTE_SESSION_TTL_SECONDS=28800
+
+# 完整多子域模式才需要；单项目测速时不要设置。
+# ROUTE_BASE_DOMAIN=preview.example.com
