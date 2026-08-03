@@ -30,14 +30,14 @@ export async function verifyWorkerPassword(password, encodedHash, secret) {
     prefix !== PASSWORD_HASH_PREFIX ||
     extra.length > 0
   ) {
-    throw new TypeError('Project passwordHash must use the hmac-sha256 format');
+    throw new TypeError('Application passwordHash must use the hmac-sha256 format');
   }
 
   const salt = base64UrlToBytes(saltText);
   const expectedHash = base64UrlToBytes(hashText);
 
   if (salt.length < 16 || expectedHash.length !== PASSWORD_KEY_BYTES) {
-    throw new TypeError('Project passwordHash has invalid key material');
+    throw new TypeError('Application passwordHash has invalid key material');
   }
 
   const actualHash = await passwordDigest(password, salt, secret);

@@ -43,17 +43,17 @@ export function parseRouteProjects(rawConfig) {
     }
 
     if (project === null || Array.isArray(project) || typeof project !== 'object') {
-      throw new RouteConfigurationError(`Project ${alias} must be an object`);
+      throw new RouteConfigurationError(`Application ${alias} must be an object`);
     }
 
     const { target, passwordHash, rewriteOrigins = false } = project;
 
     if (typeof target !== 'string' || typeof passwordHash !== 'string' || !passwordHash) {
-      throw new RouteConfigurationError(`Project ${alias} requires target and passwordHash strings`);
+      throw new RouteConfigurationError(`Application ${alias} requires target and passwordHash strings`);
     }
 
     if (typeof rewriteOrigins !== 'boolean') {
-      throw new RouteConfigurationError(`Project ${alias} rewriteOrigins must be a boolean`);
+      throw new RouteConfigurationError(`Application ${alias} rewriteOrigins must be a boolean`);
     }
 
     let targetUrl;

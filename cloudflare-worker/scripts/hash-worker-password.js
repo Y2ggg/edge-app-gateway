@@ -4,7 +4,7 @@ const password = process.argv[2];
 const secret = process.argv[3];
 
 if (!password || !secret) {
-  console.error('用法: npm run password:hash -- "项目访问密码" "ROUTE_SESSION_SECRET"');
+  console.error('用法: npm run password:hash -- "应用访问密码" "ROUTE_SESSION_SECRET"');
   process.exitCode = 1;
 } else {
   try {

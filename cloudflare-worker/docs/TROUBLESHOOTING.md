@@ -6,7 +6,7 @@
 https://项目域名/__route/health
 ```
 
-预期包含 `"build":"2026-08-03-route-v2"`。构建编号不符时，先确认 Edit code 已 Deploy、最新 Deployment 承担 Production 流量，并确认 Custom Domain 绑定的是同一个 Worker。
+预期包含 `"build":"2026-08-03-gateway-v3"`。构建编号不符时，先确认 Edit code 已 Deploy、最新 Deployment 承担 Production 流量，并确认 Custom Domain 绑定的是同一个 Worker。
 
 ## 域名和 HTTPS
 

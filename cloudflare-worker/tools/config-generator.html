@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cloudflare Route 配置生成器</title>
+    <title>Edge App Gateway 配置生成器</title>
     <style>
       :root { font-family: system-ui, sans-serif; color: #172033; background: #f5f7fa; }
       * { box-sizing: border-box; }
@@ -24,12 +24,12 @@
     </style>
   </head>
   <body>
-    <h1>Cloudflare Route 配置生成器</h1>
+    <h1>Edge App Gateway 配置生成器</h1>
     <p>此页面完全在本地浏览器运行，不发送网络请求。不要把生成结果保存到公开仓库。</p>
 
     <section>
       <h2>会话密钥</h2>
-      <p>首次部署先生成一次；所有项目共同使用该密钥。</p>
+      <p>首次部署先生成一次；所有应用共同使用该密钥。</p>
       <button id="secret-button" type="button">生成会话密钥</button>
       <textarea id="secret-output" readonly placeholder="ROUTE_SESSION_SECRET"></textarea>
       <button class="secondary" data-copy="secret-output" type="button">复制会话密钥</button>
@@ -37,9 +37,9 @@
     </section>
 
     <section>
-      <h2>项目密码散列</h2>
-      <p>每个项目使用独立密码，但必须填写线上使用的同一个会话密钥。</p>
-      <label for="password">项目访问密码</label>
+      <h2>应用密码散列</h2>
+      <p>每个应用使用独立密码，但必须填写线上使用的同一个会话密钥。</p>
+      <label for="password">应用访问密码</label>
       <input id="password" type="password" maxlength="256" autocomplete="new-password">
       <div class="field">
         <label for="hash-secret">ROUTE_SESSION_SECRET</label>
@@ -64,7 +64,7 @@
       </div>
       <div class="field">
         <label for="verify-projects">ROUTE_PROJECTS_JSON 的 Value</label>
-        <textarea id="verify-projects" placeholder='{"license":{"target":"https://project.vercel.app","passwordHash":"hmac-sha256$..."}}'></textarea>
+        <textarea id="verify-projects" placeholder='{"portal":{"target":"https://portal-app.vercel.app","passwordHash":"hmac-sha256$..."}}'></textarea>
       </div>
       <div class="field">
         <label for="verify-password">本次输入的明文密码</label>
@@ -74,7 +74,7 @@
         <label for="verify-secret">ROUTE_SESSION_SECRET</label>
         <input id="verify-secret" type="password" autocomplete="off">
       </div>
-      <button id="verify-button" type="button">检查域名、路由和密码</button>
+      <button id="verify-button" type="button">检查域名、应用映射和密码</button>
       <p class="status" id="verify-status" role="status"></p>
     </section>
 
@@ -137,7 +137,7 @@
           } else if (aliases.length === 1) {
             [alias] = aliases;
           } else {
-            throw new Error('多项目配置必须填写 ROUTE_BASE_DOMAIN。');
+            throw new Error('多应用配置必须填写 ROUTE_BASE_DOMAIN。');
           }
 
           const project = projects[alias];
@@ -151,11 +151,11 @@
           const matches = await verifyPassword(password, project.passwordHash, secret);
 
           if (!matches) {
-            throw new Error(`域名已匹配项目“${alias}”，但密码与 passwordHash 不匹配。`);
+            throw new Error(`域名已匹配应用“${alias}”，但密码与 passwordHash 不匹配。`);
           }
 
           status.dataset.error = 'false';
-          status.textContent = `检查通过：域名匹配项目“${alias}”，密码散列有效。`;
+          status.textContent = `检查通过：域名匹配应用“${alias}”，密码散列有效。`;
         } catch (error) {
           status.textContent = error.message;
         }
@@ -230,7 +230,7 @@
         }
 
         if (!projects || Array.isArray(projects) || typeof projects !== 'object') {
-          throw new Error('ROUTE_PROJECTS_JSON 必须是项目对象。');
+          throw new Error('ROUTE_PROJECTS_JSON 必须是应用映射对象。');
         }
 
         return projects;

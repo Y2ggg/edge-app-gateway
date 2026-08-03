@@ -1,5 +1,5 @@
 {
-  "name": "cloudflare-vercel-route",
+  "name": "edge-app-gateway",
   "version": "0.1.0",
   "private": true,
   "type": "module",

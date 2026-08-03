@@ -15,7 +15,7 @@ const SUCCESS_PATH = '/__route/success';
 const SUCCESS_SCRIPT_PATH = '/__route/success.js';
 const UNAVAILABLE_PATH = '/__route/unavailable';
 const HEALTH_PATH = '/__route/health';
-const WORKER_BUILD_ID = '2026-08-03-route-v2';
+const WORKER_BUILD_ID = '2026-08-03-gateway-v3';
 const DUMMY_PASSWORD_HASH = 'hmac-sha256$ZHVtbXktcm91dGUtc2FsdA$7VCcQ_9KLIdA9rWiYngmq7WGpRLkQkrmKULgLmqv_5M';
 const REWRITABLE_CONTENT_TYPES = new Set([
   'application/json',

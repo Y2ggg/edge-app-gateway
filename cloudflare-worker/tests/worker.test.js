@@ -39,7 +39,7 @@ test('exposes a minimal health endpoint without target details', async () => {
   assert.equal(response.status, 200);
   assert.deepEqual(result, {
     ok: true,
-    build: '2026-08-03-route-v2',
+    build: '2026-08-03-gateway-v3',
     edge: 'local'
   });
 });

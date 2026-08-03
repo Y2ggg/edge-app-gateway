@@ -107,14 +107,14 @@ function parseRouteProjects(rawConfig) {
       throw new RouteConfigurationError(`Invalid route alias: ${alias}`);
     }
     if (project === null || Array.isArray(project) || typeof project !== "object") {
-      throw new RouteConfigurationError(`Project ${alias} must be an object`);
+      throw new RouteConfigurationError(`Application ${alias} must be an object`);
     }
     const { target, passwordHash, rewriteOrigins = false } = project;
     if (typeof target !== "string" || typeof passwordHash !== "string" || !passwordHash) {
-      throw new RouteConfigurationError(`Project ${alias} requires target and passwordHash strings`);
+      throw new RouteConfigurationError(`Application ${alias} requires target and passwordHash strings`);
     }
     if (typeof rewriteOrigins !== "boolean") {
-      throw new RouteConfigurationError(`Project ${alias} rewriteOrigins must be a boolean`);
+      throw new RouteConfigurationError(`Application ${alias} rewriteOrigins must be a boolean`);
     }
     let targetUrl;
     try {
@@ -152,12 +152,12 @@ async function verifyWorkerPassword(password, encodedHash, secret) {
   validateSecret(secret);
   const [prefix, saltText, hashText, ...extra] = String(encodedHash || "").split("$");
   if (prefix !== PASSWORD_HASH_PREFIX || extra.length > 0) {
-    throw new TypeError("Project passwordHash must use the hmac-sha256 format");
+    throw new TypeError("Application passwordHash must use the hmac-sha256 format");
   }
   const salt = base64UrlToBytes(saltText);
   const expectedHash = base64UrlToBytes(hashText);
   if (salt.length < 16 || expectedHash.length !== PASSWORD_KEY_BYTES) {
-    throw new TypeError("Project passwordHash has invalid key material");
+    throw new TypeError("Application passwordHash has invalid key material");
   }
   const actualHash = await passwordDigest(password, salt, secret);
   return constantTimeEqual(actualHash, expectedHash);
@@ -260,7 +260,7 @@ var SUCCESS_PATH = "/__route/success";
 var SUCCESS_SCRIPT_PATH = "/__route/success.js";
 var UNAVAILABLE_PATH = "/__route/unavailable";
 var HEALTH_PATH = "/__route/health";
-var WORKER_BUILD_ID = "2026-08-03-route-v2";
+var WORKER_BUILD_ID = "2026-08-03-gateway-v3";
 var DUMMY_PASSWORD_HASH = "hmac-sha256$ZHVtbXktcm91dGUtc2FsdA$7VCcQ_9KLIdA9rWiYngmq7WGpRLkQkrmKULgLmqv_5M";
 var REWRITABLE_CONTENT_TYPES = /* @__PURE__ */ new Set([
   "application/json",
