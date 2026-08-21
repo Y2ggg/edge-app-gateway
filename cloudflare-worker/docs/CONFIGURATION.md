@@ -13,6 +13,8 @@
 
 一个上游一个 Secret，不复用：例如 `ORIGIN_SECRET_PROJECT_A`、`ORIGIN_SECRET_PROJECT_B`。Secret 值不能进入 JSON、日志、响应、Git 或截图。
 
+本地 `tools/config-generator.html` 可以一次生成单应用路由、独立 Origin Secret、Edge Session Secret/密码散列、环境变量和 Wrangler 命令。生成器完全离线，且不会使用 localStorage、sessionStorage 或 IndexedDB；关闭页面即丢失未复制的 Secret。生产部署优先使用它输出的 `--secrets-file /dev/stdin` 流程，让新代码和新协议 Secret 在同一次 Wrangler 部署中生效。
+
 ## 路由协议
 
 ```json

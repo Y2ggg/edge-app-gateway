@@ -28,7 +28,7 @@ Edge App Gateway 是面向 Vercel 应用的 Cloudflare Worker 全栈入口。浏
 | `src/`、`lib/` | Worker 模块源码和配置、代理逻辑 |
 | `tests/` | 配置、认证、全栈代理、流式与安全测试 |
 | `dashboard/worker.js` | 从模块源码生成的 Dashboard 单文件包 |
-| `tools/config-generator.html` | 完全离线的密码散列与配置检查工具 |
+| `tools/config-generator.html` | 完全离线生成 Session/Origin Secret、密码散列、路由 JSON、环境变量和 Wrangler 部署命令 |
 | `CLOUDFLARE_DEPLOYMENT.md` | Cloudflare、Vercel WAF 和上线验收步骤 |
 | `docs/` | 配置协议、架构和故障排查 |
 

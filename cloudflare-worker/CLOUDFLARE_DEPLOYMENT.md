@@ -34,7 +34,7 @@ npm run deploy:check
 
 3. 为每个 Vercel 项目分别生成至少 32 个随机字符的 Origin Secret，禁止复用。
 4. 按[配置协议](./docs/CONFIGURATION.md)准备完整 `ROUTE_PROJECTS_JSON`。配置只能写 Binding 名，不能写 Origin Secret 值。
-5. 可在本地打开 `tools/config-generator.html` 检查 alias、新协议结构和 Edge 密码散列；工具不会发送网络请求。
+5. 可在本地打开 `tools/config-generator.html` 生成 Session/Origin Secret、密码散列、完整路由 JSON、临时环境变量和 Wrangler 原子部署命令。工具不会发送网络请求或写入浏览器存储；包含 Secret 的输出只通过 Wrangler 标准输入使用，不保存到仓库或普通文件。
 
 示例仅使用占位符：
 

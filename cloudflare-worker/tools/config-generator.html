@@ -13,14 +13,18 @@
       h2 { margin-top: 0; font-size: 18px; }
       p { color: #667085; line-height: 1.6; }
       label { display: block; margin-bottom: 8px; font-weight: 700; }
-      input, textarea, button { width: 100%; border-radius: 9px; font: inherit; }
-      input, textarea { padding: 11px 12px; border: 1px solid #cbd5e1; }
+      input, textarea, select, button { width: 100%; border-radius: 9px; font: inherit; }
+      input, textarea, select { padding: 11px 12px; border: 1px solid #cbd5e1; background: white; }
       textarea { min-height: 92px; margin-top: 12px; resize: vertical; font-family: ui-monospace, monospace; font-size: 12px; }
       button { margin-top: 12px; padding: 12px; border: 0; color: white; background: #172033; cursor: pointer; font-weight: 700; }
       button.secondary { color: #172033; background: #e9edf3; }
       .status { min-height: 22px; margin: 8px 0 0; color: #166534; font-size: 13px; }
       .status[data-error="true"] { color: #b42318; }
       .field + .field { margin-top: 14px; }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .grid .field { margin-top: 0; }
+      .output { min-height: 132px; }
+      @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
     </style>
   </head>
   <body>
@@ -32,8 +36,17 @@
       <p>首次部署先生成一次；所有应用共同使用该密钥。</p>
       <button id="secret-button" type="button">生成会话密钥</button>
       <textarea id="secret-output" readonly placeholder="ROUTE_SESSION_SECRET"></textarea>
-      <button class="secondary" data-copy="secret-output" type="button">复制会话密钥</button>
+      <button class="secondary" data-copy="secret-output" data-default-label="复制会话密钥" type="button">复制会话密钥</button>
       <p class="status" id="secret-status" role="status"></p>
+    </section>
+
+    <section>
+      <h2>项目源站密钥</h2>
+      <p>每个上游项目必须单独生成。该值同时用于 Cloudflare Secret 和 Vercel WAF，不写入路由 JSON。</p>
+      <button id="origin-secret-button" type="button">生成项目 Origin Secret</button>
+      <textarea id="origin-secret-output" readonly placeholder="项目独立 Origin Secret"></textarea>
+      <button class="secondary" data-copy="origin-secret-output" data-default-label="复制 Origin Secret" type="button">复制 Origin Secret</button>
+      <p class="status" id="origin-secret-status" role="status"></p>
     </section>
 
     <section>
@@ -47,8 +60,107 @@
       </div>
       <button id="hash-button" type="button">生成 Worker 密码散列</button>
       <textarea id="hash-output" readonly placeholder="生成结果以 hmac-sha256$ 开头"></textarea>
-      <button class="secondary" data-copy="hash-output" type="button">复制散列</button>
+      <button class="secondary" data-copy="hash-output" data-default-label="复制散列" type="button">复制散列</button>
       <p class="status" id="hash-status" role="status"></p>
+    </section>
+
+    <section>
+      <h2>生成单应用生产配置</h2>
+      <p>生成新协议路由、Wrangler Secret JSON 和部署命令。Secret JSON 应通过标准输入交给 Wrangler，不保存为普通文件。</p>
+      <div class="grid">
+        <div class="field">
+          <label for="route-worker-name">Worker 名称</label>
+          <input id="route-worker-name" type="text" value="vercel-route" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="route-alias">应用 Alias</label>
+          <input id="route-alias" type="text" placeholder="data-app" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="route-hostname">Cloudflare Custom Domain</label>
+          <input id="route-hostname" type="text" placeholder="data.apps.example.com" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="route-base-domain">ROUTE_BASE_DOMAIN（单应用可留空）</label>
+          <input id="route-base-domain" type="text" placeholder="apps.example.com" autocomplete="off">
+        </div>
+      </div>
+      <div class="field">
+        <label for="route-target">Vercel Production URL</label>
+        <input id="route-target" type="url" placeholder="https://project-name.vercel.app" autocomplete="off">
+      </div>
+      <div class="grid">
+        <div class="field">
+          <label for="route-delivery-mode">Delivery Mode</label>
+          <select id="route-delivery-mode"><option value="proxy">proxy</option><option value="redirect">redirect</option></select>
+        </div>
+        <div class="field">
+          <label for="route-proxy-profile">Proxy Profile</label>
+          <select id="route-proxy-profile"><option value="fullstack">fullstack</option><option value="static">static</option></select>
+        </div>
+        <div class="field">
+          <label for="route-origin-policy">Request Origin Policy</label>
+          <select id="route-origin-policy"><option value="rewrite-to-upstream">rewrite-to-upstream</option><option value="preserve">preserve</option></select>
+        </div>
+        <div class="field">
+          <label for="route-edge-access">Edge Access</label>
+          <select id="route-edge-access"><option value="disabled">disabled</option><option value="required">required</option></select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="route-password-hash">Edge Access passwordHash（required 时填写）</label>
+        <input id="route-password-hash" type="text" placeholder="hmac-sha256$..." autocomplete="off">
+      </div>
+      <div class="grid">
+        <div class="field">
+          <label for="route-origin-protection">Origin Protection</label>
+          <select id="route-origin-protection"><option value="required">required</option><option value="disabled">disabled</option></select>
+        </div>
+        <div class="field">
+          <label for="route-origin-header">Origin Header</label>
+          <input id="route-origin-header" type="text" value="x-edge-app-gateway-origin" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="route-secret-binding">Origin Secret Binding</label>
+          <input id="route-secret-binding" type="text" placeholder="ORIGIN_SECRET_DATA_APP" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="route-session-ttl">Session TTL Seconds</label>
+          <input id="route-session-ttl" type="number" min="300" max="604800" value="28800">
+        </div>
+      </div>
+      <div class="field">
+        <label for="route-origin-secret">项目 Origin Secret（required 时填写）</label>
+        <input id="route-origin-secret" type="password" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="route-methods">Allowed Methods（逗号分隔）</label>
+        <input id="route-methods" type="text" value="GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS" autocomplete="off">
+      </div>
+      <div class="grid">
+        <div class="field">
+          <label for="route-cache-policy">Cache Policy</label>
+          <select id="route-cache-policy"><option value="assets-only">assets-only</option><option value="no-store">no-store</option></select>
+        </div>
+        <div class="field">
+          <label for="route-cookie-domain-policy">Cookie Domain Policy</label>
+          <select id="route-cookie-domain-policy"><option value="strip">strip</option><option value="rewrite">rewrite</option></select>
+        </div>
+      </div>
+      <button id="route-generate-button" type="button">生成生产配置</button>
+      <p class="status" id="route-generate-status" role="status"></p>
+      <label for="route-json-output">ROUTE_PROJECTS_JSON</label>
+      <textarea class="output" id="route-json-output" readonly></textarea>
+      <button class="secondary" data-copy="route-json-output" data-default-label="复制路由 JSON" type="button">复制路由 JSON</button>
+      <label for="secret-bulk-output">Wrangler Secret JSON</label>
+      <textarea class="output" id="secret-bulk-output" readonly></textarea>
+      <button class="secondary" data-copy="secret-bulk-output" data-default-label="复制 Secret JSON" type="button">复制 Secret JSON</button>
+      <label for="environment-output">环境变量（仅限本地临时使用）</label>
+      <textarea class="output" id="environment-output" readonly></textarea>
+      <button class="secondary" data-copy="environment-output" data-default-label="复制环境变量" type="button">复制环境变量</button>
+      <label for="wrangler-command-output">Wrangler CLI 命令</label>
+      <textarea class="output" id="wrangler-command-output" readonly></textarea>
+      <button class="secondary" data-copy="wrangler-command-output" data-default-label="复制 Wrangler 命令" type="button">复制 Wrangler 命令</button>
     </section>
 
     <section>
@@ -80,6 +192,29 @@
 
     <script>
       const encoder = new TextEncoder();
+      const supportedMethods = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
+      const forbiddenOriginHeaders = new Set([
+        'authorization',
+        'cf-connecting-ip',
+        'connection',
+        'content-length',
+        'cookie',
+        'forwarded',
+        'host',
+        'keep-alive',
+        'proxy-authenticate',
+        'proxy-authorization',
+        'set-cookie',
+        'te',
+        'trailer',
+        'transfer-encoding',
+        'upgrade',
+        'x-forwarded-for',
+        'x-forwarded-host',
+        'x-forwarded-port',
+        'x-forwarded-proto',
+        'x-vercel-protection-bypass'
+      ]);
 
       document.querySelector('#hash-button').addEventListener('click', async () => {
         const password = document.querySelector('#password').value;
@@ -104,16 +239,48 @@
           toBase64Url(salt),
           toBase64Url(digest)
         ].join('$');
+        document.querySelector('#route-password-hash').value = document.querySelector('#hash-output').value;
+        status.dataset.error = 'false';
         status.textContent = '已生成。';
       });
 
       document.querySelector('#secret-button').addEventListener('click', () => {
-        const secret = crypto.getRandomValues(new Uint8Array(48));
-        const encoded = toBase64Url(secret);
+        const encoded = generateRandomSecret();
         document.querySelector('#secret-output').value = encoded;
         document.querySelector('#hash-secret').value = encoded;
         document.querySelector('#verify-secret').value = encoded;
+        document.querySelector('#secret-status').dataset.error = 'false';
         document.querySelector('#secret-status').textContent = '已生成。';
+      });
+
+      document.querySelector('#origin-secret-button').addEventListener('click', () => {
+        const encoded = generateRandomSecret();
+        document.querySelector('#origin-secret-output').value = encoded;
+        document.querySelector('#route-origin-secret').value = encoded;
+        document.querySelector('#origin-secret-status').dataset.error = 'false';
+        document.querySelector('#origin-secret-status').textContent = '已生成。';
+      });
+
+      document.querySelector('#route-generate-button').addEventListener('click', () => {
+        const status = document.querySelector('#route-generate-status');
+        status.dataset.error = 'true';
+        clearProductionOutputs();
+
+        try {
+          const generated = generateProductionConfiguration();
+          document.querySelector('#route-json-output').value = generated.routeJson;
+          document.querySelector('#secret-bulk-output').value = JSON.stringify(
+            generated.secrets,
+            null,
+            2
+          );
+          document.querySelector('#environment-output').value = generated.environment;
+          document.querySelector('#wrangler-command-output').value = generated.commands;
+          status.dataset.error = 'false';
+          status.textContent = '已生成。Secret 仅保留在当前页面内存中，请通过 Wrangler 标准输入部署。';
+        } catch (error) {
+          status.textContent = error.message;
+        }
       });
 
       document.querySelector('#verify-button').addEventListener('click', async () => {
@@ -184,11 +351,264 @@
 
           button.textContent = '已复制';
           window.setTimeout(() => {
-            button.textContent = button.dataset.copy === 'hash-output'
-              ? '复制散列'
-              : '复制会话密钥';
+            button.textContent = button.dataset.defaultLabel || '复制';
           }, 1200);
         });
+      }
+
+      function generateProductionConfiguration() {
+        const workerName = readValue('#route-worker-name');
+        const alias = readValue('#route-alias').toLowerCase();
+        const hostname = parseDomainInput(readValue('#route-hostname'), 'Custom Domain');
+        const baseDomain = parseBaseDomain(readValue('#route-base-domain'));
+        const target = parseTarget(readValue('#route-target'));
+        const deliveryMode = readValue('#route-delivery-mode');
+        const proxyProfile = readValue('#route-proxy-profile');
+        const requestOriginPolicy = readValue('#route-origin-policy');
+        const edgeAccessMode = readValue('#route-edge-access');
+        const originProtectionMode = readValue('#route-origin-protection');
+        const cachePolicy = readValue('#route-cache-policy');
+        const cookieDomainPolicy = readValue('#route-cookie-domain-policy');
+        const ttlSeconds = Number(readValue('#route-session-ttl'));
+
+        if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(workerName)) {
+          throw new Error('Worker 名称只能包含小写字母、数字、短横线和下划线。');
+        }
+
+        if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(alias)) {
+          throw new Error('Alias 必须是 3–63 位小写字母、数字或短横线。');
+        }
+
+        if (baseDomain) {
+          const suffix = `.${baseDomain}`;
+
+          if (!hostname.endsWith(suffix) || hostname.slice(0, -suffix.length) !== alias) {
+            throw new Error('Custom Domain 必须等于 alias + ROUTE_BASE_DOMAIN。');
+          }
+        }
+
+        if (!Number.isInteger(ttlSeconds) || ttlSeconds < 300 || ttlSeconds > 604800) {
+          throw new Error('Session TTL 必须是 300–604800 之间的整数。');
+        }
+
+        const allowedMethods = parseAllowedMethods(readValue('#route-methods'));
+
+        if (proxyProfile === 'static' && allowedMethods.some(
+          method => !['GET', 'HEAD', 'OPTIONS'].includes(method)
+        )) {
+          throw new Error('static Profile 不能启用写方法。');
+        }
+
+        if (deliveryMode === 'redirect') {
+          if (allowedMethods.some(method => !['GET', 'HEAD'].includes(method))) {
+            throw new Error('redirect 只能允许 GET 和 HEAD。');
+          }
+
+          if (requestOriginPolicy !== 'preserve') {
+            throw new Error('redirect 不能使用 Origin 改写策略。');
+          }
+
+          if (originProtectionMode !== 'disabled') {
+            throw new Error('redirect 不能启用 required 源站保护。');
+          }
+        }
+
+        const edgeAccess = { mode: edgeAccessMode };
+        const secrets = {};
+
+        if (edgeAccessMode === 'required') {
+          const passwordHash = readValue('#route-password-hash');
+          const sessionSecret = document.querySelector('#secret-output').value.trim();
+
+          validatePasswordHash(passwordHash);
+
+          if (sessionSecret.length < 32) {
+            throw new Error('Edge Access required 时请先生成或填写会话密钥。');
+          }
+
+          edgeAccess.passwordHash = passwordHash;
+          secrets.ROUTE_SESSION_SECRET = sessionSecret;
+        }
+
+        const originProtection = { mode: originProtectionMode };
+
+        if (originProtectionMode === 'required') {
+          const headerName = readValue('#route-origin-header').toLowerCase();
+          const defaultBinding = `ORIGIN_SECRET_${alias.replaceAll('-', '_').toUpperCase()}`;
+          const secretBinding = readValue('#route-secret-binding') || defaultBinding;
+          let originSecret = readValue('#route-origin-secret');
+
+          validateOriginHeader(headerName);
+
+          if (!/^[A-Z][A-Z0-9_]{0,127}$/.test(secretBinding)) {
+            throw new Error('Origin Secret Binding 必须是大写字母开头的 Binding 名。');
+          }
+
+          if (!originSecret) {
+            originSecret = generateRandomSecret();
+            document.querySelector('#route-origin-secret').value = originSecret;
+            document.querySelector('#origin-secret-output').value = originSecret;
+          }
+
+          if (originSecret.length < 16) {
+            throw new Error('项目 Origin Secret 至少需要 16 个字符。');
+          }
+
+          document.querySelector('#route-secret-binding').value = secretBinding;
+          originProtection.headerName = headerName;
+          originProtection.secretBinding = secretBinding;
+          secrets[secretBinding] = originSecret;
+        }
+
+        const route = {
+          target,
+          deliveryMode,
+          proxyProfile,
+          requestOriginPolicy,
+          edgeAccess,
+          originProtection,
+          allowedMethods,
+          cachePolicy,
+          cookieDomainPolicy
+        };
+        const routeJson = JSON.stringify({ [alias]: route });
+        secrets.ROUTE_PROJECTS_JSON = routeJson;
+
+        const environmentLines = [
+          `ROUTE_PROJECTS_JSON=${routeJson}`,
+          ...Object.entries(secrets)
+            .filter(([name]) => name !== 'ROUTE_PROJECTS_JSON')
+            .map(([name, value]) => `${name}=${value}`),
+          `ROUTE_SESSION_TTL_SECONDS=${ttlSeconds}`
+        ];
+
+        if (baseDomain) {
+          environmentLines.push(`ROUTE_BASE_DOMAIN=${baseDomain}`);
+        }
+
+        const deployArguments = [
+          'npx wrangler deploy',
+          `  --name ${shellQuote(workerName)}`,
+          `  --domain ${shellQuote(hostname)}`,
+          `  --var ${shellQuote(`ROUTE_SESSION_TTL_SECONDS:${ttlSeconds}`)}`
+        ];
+
+        if (baseDomain) {
+          deployArguments.push(`  --var ${shellQuote(`ROUTE_BASE_DOMAIN:${baseDomain}`)}`);
+        }
+
+        deployArguments.push('  --secrets-file /dev/stdin');
+        const commands = [
+          '# 运行下列命令，粘贴“Wrangler Secret JSON”，然后按 Ctrl-D。',
+          deployArguments.join(' \\\n'),
+          '',
+          `npx wrangler secret list --name ${shellQuote(workerName)}`,
+          `npx wrangler deployments list --name ${shellQuote(workerName)}`,
+          `curl -fsS ${shellQuote(`https://${hostname}/_edge-gateway/health`)}`
+        ].join('\n');
+
+        return {
+          routeJson,
+          secrets,
+          environment: environmentLines.join('\n'),
+          commands
+        };
+      }
+
+      function clearProductionOutputs() {
+        for (const selector of [
+          '#route-json-output',
+          '#secret-bulk-output',
+          '#environment-output',
+          '#wrangler-command-output'
+        ]) {
+          document.querySelector(selector).value = '';
+        }
+      }
+
+      function readValue(selector) {
+        return document.querySelector(selector).value.trim();
+      }
+
+      function parseDomainInput(rawValue, label) {
+        const value = rawValue.trim().toLowerCase();
+
+        if (
+          !value ||
+          value.includes('://') ||
+          value.includes('/') ||
+          value.includes('*') ||
+          value.includes(':') ||
+          !/^[a-z0-9.-]+$/.test(value) ||
+          !value.includes('.')
+        ) {
+          throw new Error(`${label} 必须是准确域名，不能包含协议、端口、路径或通配符。`);
+        }
+
+        return value;
+      }
+
+      function parseTarget(rawValue) {
+        let target;
+
+        try {
+          target = new URL(rawValue);
+        } catch {
+          throw new Error('Vercel Production URL 格式无效。');
+        }
+
+        if (
+          target.protocol !== 'https:' ||
+          target.username ||
+          target.password ||
+          target.search ||
+          target.hash ||
+          !target.hostname.endsWith('.vercel.app')
+        ) {
+          throw new Error('Target 必须是无凭据、查询和片段的 https://*.vercel.app URL。');
+        }
+
+        return target.toString();
+      }
+
+      function parseAllowedMethods(rawValue) {
+        const requested = rawValue.split(',').map(value => value.trim().toUpperCase()).filter(Boolean);
+
+        if (!requested.length || requested.some(method => !supportedMethods.includes(method))) {
+          throw new Error('Allowed Methods 包含空值或不受支持的方法。');
+        }
+
+        if (new Set(requested).size !== requested.length) {
+          throw new Error('Allowed Methods 不能重复。');
+        }
+
+        return supportedMethods.filter(method => requested.includes(method));
+      }
+
+      function validatePasswordHash(encodedHash) {
+        const [prefix, saltText, hashText, ...extra] = String(encodedHash || '').split('$');
+
+        if (prefix !== 'hmac-sha256' || !saltText || !hashText || extra.length) {
+          throw new Error('Edge Access required 时必须填写完整的 hmac-sha256 passwordHash。');
+        }
+      }
+
+      function validateOriginHeader(headerName) {
+        if (
+          !headerName.startsWith('x-') ||
+          !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(headerName) ||
+          forbiddenOriginHeaders.has(headerName)
+        ) {
+          throw new Error('Origin Header 必须是安全的自定义 x- Header。');
+        }
+      }
+
+      function shellQuote(value) {
+        return `'${String(value).replaceAll("'", "'\\''")}'`;
+      }
+
+      function generateRandomSecret() {
+        return toBase64Url(crypto.getRandomValues(new Uint8Array(48)));
       }
 
       function toBase64Url(bytes) {
