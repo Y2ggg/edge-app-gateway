@@ -15,7 +15,7 @@
 
 本地 `tools/config-generator.html` 可同时维护 1–200 个应用。工具按“Gateway、应用、部署结果”三个步骤工作，应用列表中一次只展开一个编辑器。全局填写 Worker 名称与 `ROUTE_BASE_DOMAIN`，每个应用默认只填写 Alias 和 Vercel Production URL；点击唯一的“生成全部配置”后，工具统一校验所有应用并补齐需要的 Session Secret、passwordHash、Origin Secret、`alias.ROUTE_BASE_DOMAIN`、Binding、安全默认策略、完整路由表和逐项目 WAF Secret。导入只恢复编辑状态，不会静默生成或导出；生成器完全离线，不使用 localStorage、sessionStorage 或 IndexedDB。
 
-工具导出的 `*.production.variables.json` 同时是敏感备份和 `npm run deploy:config` 的输入，包含普通变量、完整路由表、Session Secret、所有 Origin Secret 和 Custom Domains。它可以保存在受控 WebDAV 目录，但 WebDAV 必须使用 HTTPS、独立凭据和严格访问控制；若服务端不是端到端加密，文件应额外加密。推荐通过系统挂载或同步客户端提供本地路径，生成器不直接保存 WebDAV 凭据或连接远端。
+工具导出的 `*.production.variables.json` 同时是敏感备份和 `deploy:config` 的输入，包含普通变量、完整路由表、Session Secret、所有 Origin Secret 和 Custom Domains。它可以保存在受控 WebDAV 目录，但 WebDAV 必须使用 HTTPS、独立凭据和严格访问控制；若服务端不是端到端加密，文件应额外加密。推荐通过系统挂载或同步客户端提供本地路径，生成器不直接保存 WebDAV 凭据或连接远端。默认部署流程从 `edge-app-gateway` 仓库根目录运行 `npm --prefix cloudflare-worker run deploy:config -- ../<文件名>`；生成器会输出校验、dry-run、正式部署和健康检查的完整命令，并保证命令文件名与下载文件名一致。
 
 变量文件协议为版本化 JSON：
 

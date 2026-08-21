@@ -93,6 +93,17 @@
       .command-block { margin-top: 16px; }
       .command-block label { margin-top: 14px; }
       .command-block button { margin-top: 8px; }
+      .deploy-location { margin-bottom: 14px; padding: 14px 16px; border: 1px solid #84adff; border-radius: 10px; color: #1849a9; background: #eff8ff; }
+      .deploy-location strong { display: block; margin-bottom: 3px; }
+      .security-note { margin: 14px 0; padding: 12px 14px; border-left: 4px solid #f79009; border-radius: 8px; color: #7a2e0e; background: #fffaeb; line-height: 1.5; }
+      .recommended-flow { display: grid; gap: 10px; margin-top: 16px; }
+      .flow-item { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 14px; border: 1px solid #e4e7ec; border-radius: 10px; }
+      .flow-number { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: white; background: #175cd3; font-weight: 750; }
+      .flow-content p { margin: 3px 0 10px; font-size: 13px; }
+      .command-copy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+      .command-copy-row input { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .command-copy-row button { white-space: nowrap; }
+      .complete-flow-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
       .waf-card { margin-top: 12px; padding: 15px; border: 1px solid #fecdca; border-radius: 10px; background: #fffafa; }
       .waf-card p { margin-bottom: 10px; }
 
@@ -109,6 +120,8 @@
         .project-sidebar > button { width: auto; }
         .sticky-actions { flex-wrap: wrap; }
         .sticky-actions .status { order: 3; flex-basis: 100%; text-align: left; }
+        .command-copy-row { grid-template-columns: 1fr; }
+        .command-copy-row button { justify-self: start; }
       }
       @media (max-width: 480px) {
         .wizard-nav { gap: 5px; }
@@ -358,33 +371,88 @@
         </div>
 
         <div class="result-panel" data-result-panel="deployment">
-          <div class="callout">推荐下载完整变量文件，再运行 <code>npm run deploy:config -- 文件路径</code>。脚本通过 Wrangler 一次配置代码、普通变量、Cloudflare Secrets 和全部 Custom Domains，不需要 Cloudflare Dashboard。</div>
+          <div class="deploy-location">
+            <strong>执行位置</strong>
+            请先进入 <code>edge-app-gateway</code> 仓库根目录，再执行下面的命令。全程使用 Wrangler CLI，不需要 Cloudflare Dashboard。
+          </div>
           <ul class="config-list">
             <li>Custom Domains：<code id="generated-hostnames"></code></li>
             <li>普通变量：<code id="generated-vars"></code></li>
             <li>Cloudflare Secrets：<code id="generated-secret-names"></code></li>
           </ul>
-          <div class="result-actions">
-            <button id="config-export-result-button" type="button" disabled>下载完整变量文件（敏感）</button>
+
+          <div class="security-note">变量文件包含全部生产 Secret。下载后请妥善保管，并建议执行 <code>chmod 600 文件名</code> 限制读取权限。</div>
+
+          <div class="recommended-flow" aria-label="推荐部署流程">
+            <article class="flow-item">
+              <span class="flow-number">1</span>
+              <div class="flow-content">
+                <h3>下载变量文件</h3>
+                <p>文件名会与后续命令严格保持一致。</p>
+                <button id="config-export-result-button" type="button" disabled>下载完整变量文件（敏感）</button>
+                <p class="status" id="export-status" role="status"></p>
+              </div>
+            </article>
+            <article class="flow-item">
+              <span class="flow-number">2</span>
+              <div class="flow-content">
+                <h3>校验变量文件</h3>
+                <p>只做本地完整校验，不访问或修改 Cloudflare。</p>
+                <div class="command-copy-row">
+                  <input id="config-check-command-output" readonly aria-label="变量文件校验命令">
+                  <button class="secondary" data-copy="config-check-command-output" data-default-label="复制" type="button">复制</button>
+                </div>
+              </div>
+            </article>
+            <article class="flow-item">
+              <span class="flow-number">3</span>
+              <div class="flow-content">
+                <h3>执行 dry-run</h3>
+                <p>验证 Wrangler 构建和部署参数，不正式发布。</p>
+                <div class="command-copy-row">
+                  <input id="config-dry-run-command-output" readonly aria-label="dry-run 命令">
+                  <button class="secondary" data-copy="config-dry-run-command-output" data-default-label="复制" type="button">复制</button>
+                </div>
+              </div>
+            </article>
+            <article class="flow-item">
+              <span class="flow-number">4</span>
+              <div class="flow-content">
+                <h3>正式部署</h3>
+                <p>上传 Worker、普通变量、Secrets 和全部 Custom Domains。</p>
+                <div class="command-copy-row">
+                  <input id="config-deploy-command-output" readonly aria-label="正式部署命令">
+                  <button class="secondary" data-copy="config-deploy-command-output" data-default-label="复制" type="button">复制</button>
+                </div>
+              </div>
+            </article>
+            <article class="flow-item">
+              <span class="flow-number">5</span>
+              <div class="flow-content">
+                <h3>执行健康检查</h3>
+                <p>逐个确认 Custom Domain 已运行新版本。</p>
+                <textarea class="output" id="verify-command-output" readonly></textarea>
+                <button class="secondary" data-copy="verify-command-output" data-default-label="复制健康检查" type="button">复制健康检查</button>
+              </div>
+            </article>
           </div>
-          <p class="status" id="export-status" role="status"></p>
-          <div class="command-block">
-            <label for="config-deploy-command-output">变量文件部署命令</label>
-            <textarea class="output" id="config-deploy-command-output" readonly></textarea>
-            <button class="secondary" data-copy="config-deploy-command-output" data-default-label="复制部署命令" type="button">复制部署命令</button>
+
+          <textarea id="complete-deploy-flow-output" hidden readonly></textarea>
+          <div class="complete-flow-actions">
+            <button data-copy="complete-deploy-flow-output" data-default-label="复制完整部署流程" type="button">复制完整部署流程</button>
           </div>
+
           <details class="subpanel">
-            <summary>验收命令</summary>
-            <textarea class="output" id="verify-command-output" readonly></textarea>
-            <button class="secondary" data-copy="verify-command-output" data-default-label="复制验收命令" type="button">复制验收命令</button>
-          </details>
-          <details class="subpanel">
-            <summary>不导出文件：使用标准输入部署</summary>
+            <summary>高级部署方式</summary>
+            <p>仅在明确需要跳过变量文件时，才使用 Wrangler 标准输入方式。</p>
             <textarea class="output" id="wrangler-command-output" readonly></textarea>
             <button class="secondary" data-copy="wrangler-command-output" data-default-label="复制 Wrangler 命令" type="button">复制 Wrangler 命令</button>
             <p>执行命令后粘贴下方 Secret JSON，再按 <code>Ctrl-D</code>。</p>
             <textarea class="output sensitive" id="secret-bulk-output" readonly></textarea>
             <button class="secondary" data-copy="secret-bulk-output" data-default-label="复制 Secret JSON" type="button">复制 Secret JSON</button>
+            <label for="advanced-inspection-output" style="margin-top: 16px">账号、Binding 与部署记录检查</label>
+            <textarea class="output" id="advanced-inspection-output" readonly></textarea>
+            <button class="secondary" data-copy="advanced-inspection-output" data-default-label="复制高级检查命令" type="button">复制高级检查命令</button>
           </details>
         </div>
 

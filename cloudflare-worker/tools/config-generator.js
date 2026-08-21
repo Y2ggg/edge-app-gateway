@@ -136,14 +136,24 @@ document.addEventListener('click', async event => {
   const value = output?.value ?? output?.textContent ?? '';
   if (!value) return;
 
+  let copied = false;
   try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
     await navigator.clipboard.writeText(value);
+    copied = true;
   } catch {
-    if (typeof output.select === 'function') output.select();
-    document.execCommand('copy');
+    const temporaryOutput = document.createElement('textarea');
+    temporaryOutput.value = value;
+    temporaryOutput.readOnly = true;
+    temporaryOutput.style.position = 'fixed';
+    temporaryOutput.style.opacity = '0';
+    document.body.append(temporaryOutput);
+    temporaryOutput.select();
+    copied = document.execCommand('copy');
+    temporaryOutput.remove();
   }
 
-  button.textContent = '已复制';
+  button.textContent = copied ? '已复制' : '请手动复制';
   window.setTimeout(() => {
     button.textContent = button.dataset.defaultLabel || '复制';
   }, 1200);
@@ -551,10 +561,39 @@ async function generateProductionConfiguration() {
     vars,
     secrets
   };
-  const verifyCommands = [
+  const variablesFilePath = `../${variablesFileName}`;
+  const deployCommandPrefix = [
+    'npm --prefix cloudflare-worker run deploy:config --',
+    shellQuote(variablesFilePath)
+  ].join(' ');
+  const checkCommand = `${deployCommandPrefix} --check`;
+  const dryRunCommand = `${deployCommandPrefix} --dry-run`;
+  const deployCommand = deployCommandPrefix;
+  const healthCheckCommands = customDomains
+    .map(domain => `curl -fsS ${shellQuote(`https://${domain}/_edge-gateway/health`)}`)
+    .join('\n');
+  const advancedInspectionCommands = [
+    'cd cloudflare-worker',
+    `npx wrangler whoami`,
     `npx wrangler secret list --name ${shellQuote(workerName)}`,
-    `npx wrangler deployments list --name ${shellQuote(workerName)}`,
-    ...customDomains.map(domain => `curl -fsS ${shellQuote(`https://${domain}/_edge-gateway/health`)}`)
+    `npx wrangler deployments list --name ${shellQuote(workerName)}`
+  ].join('\n');
+  const completeDeployFlow = [
+    '# 执行位置：edge-app-gateway 仓库根目录',
+    '# 变量文件包含生产 Secret，建议限制文件权限',
+    `chmod 600 ${shellQuote(variablesFileName)}`,
+    '',
+    '# 校验（仅本地，不访问 Cloudflare）',
+    checkCommand,
+    '',
+    '# Dry-run（不正式部署）',
+    dryRunCommand,
+    '',
+    '# 正式部署',
+    deployCommand,
+    '',
+    '# 健康检查',
+    healthCheckCommands
   ].join('\n');
   const environment = [
     '# 普通变量（Wrangler --var）',
@@ -579,8 +618,12 @@ async function generateProductionConfiguration() {
     variablesFileName,
     environment,
     wranglerCommand: deployArguments.join(' \\\n'),
-    configDeployCommand: `npm run deploy:config -- ${shellQuote(variablesFileName)}`,
-    verifyCommands
+    checkCommand,
+    dryRunCommand,
+    deployCommand,
+    healthCheckCommands,
+    advancedInspectionCommands,
+    completeDeployFlow
   };
 }
 
@@ -589,8 +632,12 @@ function renderGeneratedConfiguration(generated) {
   document.querySelector('#secret-bulk-output').value = JSON.stringify(generated.secrets, null, 2);
   document.querySelector('#environment-output').value = generated.environment;
   document.querySelector('#wrangler-command-output').value = generated.wranglerCommand;
-  document.querySelector('#config-deploy-command-output').value = generated.configDeployCommand;
-  document.querySelector('#verify-command-output').value = generated.verifyCommands;
+  document.querySelector('#config-check-command-output').value = generated.checkCommand;
+  document.querySelector('#config-dry-run-command-output').value = generated.dryRunCommand;
+  document.querySelector('#config-deploy-command-output').value = generated.deployCommand;
+  document.querySelector('#verify-command-output').value = generated.healthCheckCommands;
+  document.querySelector('#advanced-inspection-output').value = generated.advancedInspectionCommands;
+  document.querySelector('#complete-deploy-flow-output').value = generated.completeDeployFlow;
   document.querySelector('#generated-hostnames').textContent = generated.customDomains.join(', ');
   document.querySelector('#generated-vars').textContent = Object.keys(generated.vars).join(', ');
   document.querySelector('#generated-secret-names').textContent = Object.keys(generated.secrets).join(', ');
@@ -640,8 +687,12 @@ function clearProductionOutputs() {
     '#secret-bulk-output',
     '#environment-output',
     '#wrangler-command-output',
+    '#config-check-command-output',
+    '#config-dry-run-command-output',
     '#config-deploy-command-output',
-    '#verify-command-output'
+    '#verify-command-output',
+    '#advanced-inspection-output',
+    '#complete-deploy-flow-output'
   ]) {
     document.querySelector(selector).value = '';
   }

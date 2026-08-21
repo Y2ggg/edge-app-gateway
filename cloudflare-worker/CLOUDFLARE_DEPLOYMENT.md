@@ -61,22 +61,28 @@ npm run deploy:check
 
 ## 3. 使用 Wrangler CLI 部署 Worker
 
-首次操作先核对 Wrangler 账号与现有 Binding：
+首次操作先安装依赖，再核对 Wrangler 账号与现有 Binding：
 
 ```bash
+cd cloudflare-worker
+npm install
 npx wrangler whoami
 npx wrangler secret list --name vercel-route
+cd ..
 ```
 
-变量文件可以位于本地磁盘或已挂载/同步的 WebDAV 目录。先校验，再 dry-run，最后部署：
+变量文件可以位于本地磁盘或已挂载/同步的 WebDAV 目录。以下推荐流程统一从 `edge-app-gateway` 仓库根目录执行；先校验，再 dry-run，最后部署：
 
 ```bash
-npm run deploy:config -- /受控路径/vercel-route.production.variables.json --check
-npm run deploy:config -- /受控路径/vercel-route.production.variables.json --dry-run
-npm run deploy:config -- /受控路径/vercel-route.production.variables.json
+chmod 600 vercel-route.production.variables.json
+npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json --check
+npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json --dry-run
+npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json
 ```
 
-部署脚本校验文件版本、路由协议、Secret Binding、Alias、基础域名及全部 Custom Domains，然后调用本地 Wrangler。Secret JSON 只写入 Wrangler 标准输入，不出现在命令行参数或脚本日志中。普通变量使用 `--var`，每个精确域名使用一个 `--domain`；Rate Limiter、`workers_dev=false` 和 `preview_urls=false` 继续由 `wrangler.jsonc` 管理。
+`npm --prefix` 会让部署脚本在 `cloudflare-worker/` 内运行，因此根目录变量文件参数使用 `../<文件名>`。部署脚本会从自身位置自动定位 Worker 和 Wrangler，校验文件版本、路由协议、Secret Binding、Alias、基础域名及全部 Custom Domains。Secret JSON 只写入 Wrangler 标准输入，不出现在命令行参数或脚本日志中。普通变量使用 `--var`，每个精确域名使用一个 `--domain`；Rate Limiter、`workers_dev=false` 和 `preview_urls=false` 继续由 `wrangler.jsonc` 管理。
+
+`--check` 完全在本地执行，不检查登录、不访问 Cloudflare。`--dry-run` 调用 Wrangler 构建但不会正式部署。正式部署成功后，脚本会输出 Worker 名称、Version ID、Custom Domains、Secret Binding 名称和逐域名健康检查命令；任何输出都会过滤已知 Secret 值。
 
 只有 disabled Edge Access 路由时可以省略 `ROUTE_SESSION_SECRET`。每个 `originProtection.secretBinding` 都必须在文件的 `secrets` 中存在，否则脚本拒绝部署。
 

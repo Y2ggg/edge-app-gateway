@@ -50,13 +50,15 @@ npm run test:coverage
 npm run deploy:check
 ```
 
-使用生成器导出的敏感变量文件进行 CLI 校验或部署：
+使用生成器导出的敏感变量文件时，请先进入 `edge-app-gateway` 仓库根目录。变量文件默认也下载到这里：
 
 ```bash
-npm run deploy:config -- /受控路径/vercel-route.production.variables.json --check
-npm run deploy:config -- /受控路径/vercel-route.production.variables.json --dry-run
-npm run deploy:config -- /受控路径/vercel-route.production.variables.json
+npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json --check
+npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json --dry-run
+npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json
 ```
+
+首次使用先运行 `npm --prefix cloudflare-worker install`。变量文件包含生产 Secret，建议执行 `chmod 600 vercel-route.production.variables.json`。部署脚本会自动定位 Worker 项目目录；文件不存在时会显示解析后的完整路径和正确的根目录命令，Wrangler 未登录时会给出 `whoami`/`login` 修复步骤。
 
 `dashboard/worker.js` 是生成文件，业务逻辑只维护在 `src/` 和 `lib/`。`.dev.vars`、真实域名、完整生产路由表、密码、散列、会话密钥和源站密钥不得提交。
 

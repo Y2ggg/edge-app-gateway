@@ -82,8 +82,35 @@ test('keeps the workflow compact with steps, master-detail editing and result ta
   assert.match(generatorScript, /function activateResultTab/);
 });
 
+test('generates one repository-root deployment flow with synchronized filenames', () => {
+  assert.match(generatorHtml, /请先进入 <code>edge-app-gateway<\/code> 仓库根目录/);
+  assert.match(generatorHtml, /id="config-check-command-output"/);
+  assert.match(generatorHtml, /id="config-dry-run-command-output"/);
+  assert.match(generatorHtml, /id="config-deploy-command-output"/);
+  assert.match(generatorHtml, /id="complete-deploy-flow-output"/);
+  assert.match(generatorHtml, /data-default-label="复制完整部署流程"/);
+  assert.match(generatorHtml, /高级部署方式/);
+  assert.match(generatorScript, /const variablesFilePath = `\.\.\/\$\{variablesFileName\}`/);
+  assert.match(generatorScript, /npm --prefix cloudflare-worker run deploy:config --/);
+  assert.match(generatorScript, /const checkCommand = `\$\{deployCommandPrefix\} --check`/);
+  assert.match(generatorScript, /const dryRunCommand = `\$\{deployCommandPrefix\} --dry-run`/);
+  assert.match(generatorScript, /chmod 600/);
+});
+
+test('provides an independent copy action for every recommended command', () => {
+  for (const outputId of [
+    'config-check-command-output',
+    'config-dry-run-command-output',
+    'config-deploy-command-output',
+    'verify-command-output',
+    'complete-deploy-flow-output'
+  ]) {
+    assert.match(generatorHtml, new RegExp(`data-copy="${outputId}"`));
+  }
+});
+
 test('explains CLI and WebDAV-safe ownership of variables', () => {
-  assert.match(generatorHtml, /npm run deploy:config/);
+  assert.match(generatorScript, /npm --prefix cloudflare-worker run deploy:config/);
   assert.match(generatorHtml, /受控 WebDAV 目录/);
   assert.match(generatorHtml, /不需要 Cloudflare Dashboard/);
   assert.match(generatorHtml, /普通变量：/);
