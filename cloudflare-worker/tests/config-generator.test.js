@@ -33,6 +33,26 @@ test('generates the complete production configuration without writing secrets', 
   assert.doesNotMatch(generatorSource, /localStorage|sessionStorage|indexedDB/);
 });
 
+test('keeps the default onboarding form small and explains binding ownership', () => {
+  assert.match(generatorSource, /默认只填两个地址/);
+  assert.match(generatorSource, /id="route-hostname"/);
+  assert.match(generatorSource, /id="route-target"/);
+  assert.match(generatorSource, /function deriveGatewayDomain/);
+  assert.match(generatorSource, /高级设置（通常不用改）/);
+  assert.match(generatorSource, /不需要去 Cloudflare Dashboard 手工添加环境变量/);
+  assert.match(generatorSource, /普通变量：/);
+  assert.match(generatorSource, /Cloudflare Secrets：/);
+  assert.match(generatorSource, /Vercel WAF 使用：/);
+});
+
+test('supports merging existing projects and keeps secrets out of the variable summary', () => {
+  assert.match(generatorSource, /id="route-existing-projects"/);
+  assert.match(generatorSource, /projects\[alias\] = route/);
+  assert.match(generatorSource, /for \(const projectAlias of Object\.keys\(projects\)\)/);
+  assert.match(generatorSource, /# Secrets（Wrangler --secrets-file 自动配置）/);
+  assert.doesNotMatch(generatorSource, /`ROUTE_PROJECTS_JSON=\$\{routeJson\}`/);
+});
+
 test('keeps the inline generator script syntactically valid', () => {
   const script = generatorSource.match(/<script>([\s\S]*?)<\/script>/)?.[1];
 

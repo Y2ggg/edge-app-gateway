@@ -5,167 +5,250 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Edge App Gateway 配置生成器</title>
     <style>
-      :root { font-family: system-ui, sans-serif; color: #172033; background: #f5f7fa; }
+      :root {
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #172033;
+        background: #f4f7fb;
+      }
       * { box-sizing: border-box; }
-      body { max-width: 720px; margin: 0 auto; padding: 32px 18px; }
-      section { margin-bottom: 20px; padding: 24px; border: 1px solid #dfe5ed; border-radius: 14px; background: white; }
-      h1 { margin: 0 0 8px; font-size: 26px; }
-      h2 { margin-top: 0; font-size: 18px; }
-      p { color: #667085; line-height: 1.6; }
-      label { display: block; margin-bottom: 8px; font-weight: 700; }
-      input, textarea, select, button { width: 100%; border-radius: 9px; font: inherit; }
-      input, textarea, select { padding: 11px 12px; border: 1px solid #cbd5e1; background: white; }
-      textarea { min-height: 92px; margin-top: 12px; resize: vertical; font-family: ui-monospace, monospace; font-size: 12px; }
+      body { max-width: 780px; margin: 0 auto; padding: 40px 18px 72px; }
+      section, details.panel {
+        margin-bottom: 20px;
+        padding: 24px;
+        border: 1px solid #dfe5ed;
+        border-radius: 16px;
+        background: white;
+        box-shadow: 0 8px 26px rgb(15 23 42 / 4%);
+      }
+      h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -.02em; }
+      h2 { margin: 0 0 8px; font-size: 19px; }
+      h3 { margin: 22px 0 8px; font-size: 15px; }
+      p { margin: 6px 0 16px; color: #667085; line-height: 1.6; }
+      .lede { margin-bottom: 24px; }
+      label { display: block; margin-bottom: 7px; font-weight: 700; }
+      small, .help { display: block; margin-top: 6px; color: #667085; line-height: 1.5; }
+      input, textarea, select, button { width: 100%; border-radius: 10px; font: inherit; }
+      input, textarea, select { padding: 12px 13px; border: 1px solid #cbd5e1; background: white; }
+      input:focus, textarea:focus, select:focus { outline: 3px solid #dbeafe; border-color: #2563eb; }
+      input[readonly] { color: #475467; background: #f8fafc; }
+      textarea { min-height: 96px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
       button { margin-top: 12px; padding: 12px; border: 0; color: white; background: #172033; cursor: pointer; font-weight: 700; }
+      button:hover { background: #26334d; }
       button.secondary { color: #172033; background: #e9edf3; }
-      .status { min-height: 22px; margin: 8px 0 0; color: #166534; font-size: 13px; }
+      button.secondary:hover { background: #dfe5ed; }
+      summary { cursor: pointer; font-weight: 750; }
+      details.panel > summary { font-size: 17px; }
+      details.panel[open] > summary { margin-bottom: 20px; }
+      details.subpanel { margin-top: 18px; padding: 14px 16px; border: 1px solid #e4e7ec; border-radius: 12px; }
+      details.subpanel[open] > summary { margin-bottom: 16px; }
+      .status { min-height: 22px; margin: 10px 0 0; color: #166534; font-size: 13px; }
       .status[data-error="true"] { color: #b42318; }
-      .field + .field { margin-top: 14px; }
-      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .field + .field { margin-top: 16px; }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
       .grid .field { margin-top: 0; }
-      .output { min-height: 132px; }
-      @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
+      .derived {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin: 16px 0;
+        padding: 14px;
+        border-radius: 12px;
+        background: #f8fafc;
+      }
+      .derived span { display: block; color: #667085; font-size: 12px; }
+      .derived code { display: block; margin-top: 4px; overflow-wrap: anywhere; color: #172033; }
+      .callout { padding: 14px 16px; border-radius: 12px; background: #eff6ff; color: #1e3a8a; line-height: 1.55; }
+      .result { display: none; }
+      .result[data-visible="true"] { display: block; }
+      .config-list { margin: 14px 0; padding: 0; list-style: none; }
+      .config-list li { padding: 10px 0; border-bottom: 1px solid #eef2f6; }
+      .config-list li:last-child { border-bottom: 0; }
+      .config-list code { overflow-wrap: anywhere; }
+      .step { margin-top: 18px; padding-top: 18px; border-top: 1px solid #e4e7ec; }
+      .step-number { display: inline-grid; width: 26px; height: 26px; margin-right: 8px; place-items: center; border-radius: 50%; color: white; background: #2563eb; font-size: 13px; }
+      .output { min-height: 118px; }
+      .sensitive { border-color: #f5c2c7; background: #fff8f8; }
+      [hidden] { display: none !important; }
+      @media (max-width: 620px) {
+        body { padding-top: 26px; }
+        .grid, .derived { grid-template-columns: 1fr; }
+        section, details.panel { padding: 20px; }
+      }
     </style>
   </head>
   <body>
     <h1>Edge App Gateway 配置生成器</h1>
-    <p>此页面完全在本地浏览器运行，不发送网络请求。不要把生成结果保存到公开仓库。</p>
+    <p class="lede">默认只填两个地址，其余安全配置自动生成。页面完全离线运行，不发送网络请求，也不保存 Secret。</p>
 
     <section>
-      <h2>会话密钥</h2>
-      <p>首次部署先生成一次；所有应用共同使用该密钥。</p>
-      <button id="secret-button" type="button">生成会话密钥</button>
-      <textarea id="secret-output" readonly placeholder="ROUTE_SESSION_SECRET"></textarea>
-      <button class="secondary" data-copy="secret-output" data-default-label="复制会话密钥" type="button">复制会话密钥</button>
-      <p class="status" id="secret-status" role="status"></p>
-    </section>
-
-    <section>
-      <h2>项目源站密钥</h2>
-      <p>每个上游项目必须单独生成。该值同时用于 Cloudflare Secret 和 Vercel WAF，不写入路由 JSON。</p>
-      <button id="origin-secret-button" type="button">生成项目 Origin Secret</button>
-      <textarea id="origin-secret-output" readonly placeholder="项目独立 Origin Secret"></textarea>
-      <button class="secondary" data-copy="origin-secret-output" data-default-label="复制 Origin Secret" type="button">复制 Origin Secret</button>
-      <p class="status" id="origin-secret-status" role="status"></p>
-    </section>
-
-    <section>
-      <h2>应用密码散列</h2>
-      <p>仅 Edge Access 为 required 的应用需要独立密码，并使用线上相同的会话密钥。</p>
-      <label for="password">应用访问密码</label>
-      <input id="password" type="password" maxlength="256" autocomplete="new-password">
+      <h2>1. 填写项目地址</h2>
+      <p>域名的第一段会自动成为项目 Alias，剩余部分会自动成为 <code>ROUTE_BASE_DOMAIN</code>。</p>
       <div class="field">
-        <label for="hash-secret">ROUTE_SESSION_SECRET</label>
-        <input id="hash-secret" type="password" autocomplete="off">
-      </div>
-      <button id="hash-button" type="button">生成 Worker 密码散列</button>
-      <textarea id="hash-output" readonly placeholder="生成结果以 hmac-sha256$ 开头"></textarea>
-      <button class="secondary" data-copy="hash-output" data-default-label="复制散列" type="button">复制散列</button>
-      <p class="status" id="hash-status" role="status"></p>
-    </section>
-
-    <section>
-      <h2>生成单应用生产配置</h2>
-      <p>生成新协议路由、Wrangler Secret JSON 和部署命令。Secret JSON 应通过标准输入交给 Wrangler，不保存为普通文件。</p>
-      <div class="grid">
-        <div class="field">
-          <label for="route-worker-name">Worker 名称</label>
-          <input id="route-worker-name" type="text" value="vercel-route" autocomplete="off">
-        </div>
-        <div class="field">
-          <label for="route-alias">应用 Alias</label>
-          <input id="route-alias" type="text" placeholder="data-app" autocomplete="off">
-        </div>
-        <div class="field">
-          <label for="route-hostname">Cloudflare Custom Domain</label>
-          <input id="route-hostname" type="text" placeholder="data.apps.example.com" autocomplete="off">
-        </div>
-        <div class="field">
-          <label for="route-base-domain">ROUTE_BASE_DOMAIN（单应用可留空）</label>
-          <input id="route-base-domain" type="text" placeholder="apps.example.com" autocomplete="off">
-        </div>
+        <label for="route-hostname">用户访问的完整域名</label>
+        <input id="route-hostname" type="text" placeholder="data.preview.example.com" autocomplete="off">
+        <small>只填域名，不要填写 <code>https://</code>、端口或路径。</small>
       </div>
       <div class="field">
         <label for="route-target">Vercel Production URL</label>
         <input id="route-target" type="url" placeholder="https://project-name.vercel.app" autocomplete="off">
       </div>
-      <div class="grid">
-        <div class="field">
-          <label for="route-delivery-mode">Delivery Mode</label>
-          <select id="route-delivery-mode"><option value="proxy">proxy</option><option value="redirect">redirect</option></select>
-        </div>
-        <div class="field">
-          <label for="route-proxy-profile">Proxy Profile</label>
-          <select id="route-proxy-profile"><option value="fullstack">fullstack</option><option value="static">static</option></select>
-        </div>
-        <div class="field">
-          <label for="route-origin-policy">Request Origin Policy</label>
-          <select id="route-origin-policy"><option value="rewrite-to-upstream">rewrite-to-upstream</option><option value="preserve">preserve</option></select>
-        </div>
-        <div class="field">
-          <label for="route-edge-access">Edge Access</label>
-          <select id="route-edge-access"><option value="disabled">disabled</option><option value="required">required</option></select>
-        </div>
+      <input id="route-alias" type="hidden">
+      <input id="route-base-domain" type="hidden">
+      <div class="derived" aria-live="polite">
+        <div><span>自动识别的项目 Alias</span><code id="derived-alias">等待填写域名</code></div>
+        <div><span>自动配置的基础域名</span><code id="derived-base-domain">等待填写域名</code></div>
       </div>
+
       <div class="field">
-        <label for="route-password-hash">Edge Access passwordHash（required 时填写）</label>
-        <input id="route-password-hash" type="text" placeholder="hmac-sha256$..." autocomplete="off">
+        <label for="route-edge-access">是否增加 Gateway 密码登录</label>
+        <select id="route-edge-access">
+          <option value="disabled">不需要，上游应用自己登录（推荐）</option>
+          <option value="required">需要，先通过 Gateway 密码</option>
+        </select>
+        <small>这不会影响上游应用自己的 Access Gate。</small>
       </div>
-      <div class="grid">
+
+      <div id="edge-access-fields" hidden>
         <div class="field">
-          <label for="route-origin-protection">Origin Protection</label>
-          <select id="route-origin-protection"><option value="required">required</option><option value="disabled">disabled</option></select>
+          <label for="password">Gateway 访问密码</label>
+          <input id="password" type="password" maxlength="256" autocomplete="new-password">
         </div>
         <div class="field">
-          <label for="route-origin-header">Origin Header</label>
-          <input id="route-origin-header" type="text" value="x-edge-app-gateway-origin" autocomplete="off">
+          <label for="hash-secret">现有 ROUTE_SESSION_SECRET（可选）</label>
+          <input id="hash-secret" type="password" autocomplete="off">
+          <small>已有其他 Edge 登录项目时必须粘贴原值；全新 Worker 可留空自动生成。</small>
         </div>
-        <div class="field">
-          <label for="route-secret-binding">Origin Secret Binding</label>
-          <input id="route-secret-binding" type="text" placeholder="ORIGIN_SECRET_DATA_APP" autocomplete="off">
-        </div>
-        <div class="field">
-          <label for="route-session-ttl">Session TTL Seconds</label>
-          <input id="route-session-ttl" type="number" min="300" max="604800" value="28800">
-        </div>
+        <button id="hash-button" type="button">生成登录配置</button>
+        <p class="status" id="hash-status" role="status"></p>
       </div>
-      <div class="field">
-        <label for="route-origin-secret">项目 Origin Secret（required 时填写）</label>
-        <input id="route-origin-secret" type="password" autocomplete="off">
-      </div>
-      <div class="field">
-        <label for="route-methods">Allowed Methods（逗号分隔）</label>
-        <input id="route-methods" type="text" value="GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS" autocomplete="off">
-      </div>
-      <div class="grid">
-        <div class="field">
-          <label for="route-cache-policy">Cache Policy</label>
-          <select id="route-cache-policy"><option value="assets-only">assets-only</option><option value="no-store">no-store</option></select>
+      <input id="route-password-hash" type="hidden">
+
+      <details class="subpanel">
+        <summary>高级设置（通常不用改）</summary>
+        <div class="grid">
+          <div class="field">
+            <label for="route-worker-name">Worker 名称</label>
+            <input id="route-worker-name" type="text" value="vercel-route" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="route-session-ttl">登录有效期（秒）</label>
+            <input id="route-session-ttl" type="number" min="300" max="604800" value="28800">
+          </div>
+          <div class="field">
+            <label for="route-delivery-mode">交付方式</label>
+            <select id="route-delivery-mode"><option value="proxy">反向代理</option><option value="redirect">浏览器跳转</option></select>
+          </div>
+          <div class="field">
+            <label for="route-proxy-profile">应用类型</label>
+            <select id="route-proxy-profile"><option value="fullstack">全栈应用</option><option value="static">纯静态网站</option></select>
+          </div>
+          <div class="field">
+            <label for="route-origin-policy">浏览器 Origin</label>
+            <select id="route-origin-policy"><option value="rewrite-to-upstream">安全重写到上游</option><option value="preserve">保持原值</option></select>
+          </div>
+          <div class="field">
+            <label for="route-origin-protection">阻止绕过 Gateway</label>
+            <select id="route-origin-protection"><option value="required">启用（推荐）</option><option value="disabled">禁用</option></select>
+          </div>
+          <div class="field">
+            <label for="route-cache-policy">缓存策略</label>
+            <select id="route-cache-policy"><option value="assets-only">仅静态资源</option><option value="no-store">全部不缓存</option></select>
+          </div>
+          <div class="field">
+            <label for="route-cookie-domain-policy">上游 Cookie Domain</label>
+            <select id="route-cookie-domain-policy"><option value="strip">删除并绑定当前域名</option><option value="rewrite">改写为当前域名</option></select>
+          </div>
         </div>
         <div class="field">
-          <label for="route-cookie-domain-policy">Cookie Domain Policy</label>
-          <select id="route-cookie-domain-policy"><option value="strip">strip</option><option value="rewrite">rewrite</option></select>
+          <label for="route-methods">允许的 HTTP 方法</label>
+          <input id="route-methods" type="text" value="GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS" autocomplete="off">
         </div>
-      </div>
-      <button id="route-generate-button" type="button">生成生产配置</button>
+        <div class="grid">
+          <div class="field">
+            <label for="route-origin-header">源站保护 Header</label>
+            <input id="route-origin-header" type="text" value="x-edge-app-gateway-origin" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="route-secret-binding">项目 Secret Binding（可留空）</label>
+            <input id="route-secret-binding" type="text" placeholder="自动按 Alias 生成" autocomplete="off">
+          </div>
+        </div>
+        <div class="field">
+          <label for="route-origin-secret">已有项目 Origin Secret（可留空）</label>
+          <input id="route-origin-secret" type="password" autocomplete="off">
+          <small>留空会自动生成。已有 WAF 配置且不想轮换时才粘贴原值。</small>
+        </div>
+        <button id="origin-secret-button" class="secondary" type="button">立即生成新的 Origin Secret</button>
+        <p class="status" id="origin-secret-status" role="status"></p>
+        <div class="field">
+          <label for="route-existing-projects">已有 ROUTE_PROJECTS_JSON（新增第二个项目时才填）</label>
+          <textarea id="route-existing-projects" placeholder="留空表示创建新的路由表；粘贴现有值会保留旧项目并加入当前项目。"></textarea>
+          <small>Wrangler 会完整替换路由表。已有项目时必须合并，不能只生成新项目。</small>
+        </div>
+      </details>
+
+      <button id="route-generate-button" type="button">生成部署配置</button>
       <p class="status" id="route-generate-status" role="status"></p>
-      <label for="route-json-output">ROUTE_PROJECTS_JSON</label>
-      <textarea class="output" id="route-json-output" readonly></textarea>
-      <button class="secondary" data-copy="route-json-output" data-default-label="复制路由 JSON" type="button">复制路由 JSON</button>
-      <label for="secret-bulk-output">Wrangler Secret JSON</label>
-      <textarea class="output" id="secret-bulk-output" readonly></textarea>
-      <button class="secondary" data-copy="secret-bulk-output" data-default-label="复制 Secret JSON" type="button">复制 Secret JSON</button>
-      <label for="environment-output">环境变量（仅限本地临时使用）</label>
-      <textarea class="output" id="environment-output" readonly></textarea>
-      <button class="secondary" data-copy="environment-output" data-default-label="复制环境变量" type="button">复制环境变量</button>
-      <label for="wrangler-command-output">Wrangler CLI 命令</label>
-      <textarea class="output" id="wrangler-command-output" readonly></textarea>
-      <button class="secondary" data-copy="wrangler-command-output" data-default-label="复制 Wrangler 命令" type="button">复制 Wrangler 命令</button>
     </section>
 
-    <section>
-      <h2>验证现有配置</h2>
-      <p>配置和密码只在本页内存中处理，不会发送到网络。</p>
+    <section class="result" id="deployment-result" data-visible="false">
+      <h2>2. 按顺序部署</h2>
+      <div class="callout">不需要去 Cloudflare Dashboard 手工添加环境变量。下面的 Wrangler 命令会一次配置普通变量、Secrets、Custom Domains 和 Worker 代码。</div>
+
+      <h3>最终配置清单</h3>
+      <ul class="config-list">
+        <li>Custom Domain：<code id="generated-hostname"></code></li>
+        <li>普通变量：<code id="generated-vars"></code></li>
+        <li>Cloudflare Secrets：<code id="generated-secret-names"></code></li>
+        <li>Vercel WAF 使用：<code id="generated-origin-binding"></code> 的值</li>
+      </ul>
+
+      <div class="step">
+        <h3><span class="step-number">1</span>复制命令，在 Worker 目录运行</h3>
+        <p>命令启动后会等待你输入 Secret JSON。</p>
+        <textarea class="output" id="wrangler-command-output" readonly></textarea>
+        <button class="secondary" data-copy="wrangler-command-output" data-default-label="复制部署命令" type="button">复制部署命令</button>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-number">2</span>复制 Secret JSON，粘贴到终端</h3>
+        <p>粘贴后按 <code>Ctrl-D</code> 完成部署。不要把这段内容发到聊天或提交到 Git。</p>
+        <textarea class="output sensitive" id="secret-bulk-output" readonly></textarea>
+        <button class="secondary" data-copy="secret-bulk-output" data-default-label="复制 Secret JSON" type="button">复制 Secret JSON</button>
+      </div>
+
+      <div class="step" id="waf-step">
+        <h3><span class="step-number">3</span>配置 Vercel WAF</h3>
+        <p>把下面这个项目独立 Secret 粘贴为 Vercel WAF 的 Header 比较值，先使用 Log，验证后再改成 Deny。</p>
+        <textarea class="sensitive" id="origin-secret-output" readonly placeholder="未启用源站保护"></textarea>
+        <button class="secondary" data-copy="origin-secret-output" data-default-label="复制 Vercel WAF Secret" type="button">复制 Vercel WAF Secret</button>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-number">4</span>运行验收命令</h3>
+        <textarea class="output" id="verify-command-output" readonly></textarea>
+        <button class="secondary" data-copy="verify-command-output" data-default-label="复制验收命令" type="button">复制验收命令</button>
+      </div>
+
+      <details class="subpanel">
+        <summary>查看原始配置和排错信息</summary>
+        <label for="environment-output">变量归属清单（不含 Secret 值）</label>
+        <textarea class="output" id="environment-output" readonly></textarea>
+        <label for="route-json-output">完整 ROUTE_PROJECTS_JSON</label>
+        <textarea class="output" id="route-json-output" readonly></textarea>
+        <button class="secondary" data-copy="route-json-output" data-default-label="复制路由 JSON" type="button">复制路由 JSON</button>
+        <label for="secret-output">ROUTE_SESSION_SECRET（仅 Edge 登录启用时生成）</label>
+        <textarea id="secret-output" readonly></textarea>
+        <button id="secret-button" class="secondary" type="button">重新生成会话 Secret</button>
+        <p class="status" id="secret-status" role="status"></p>
+        <label for="hash-output">Edge Access passwordHash</label>
+        <textarea id="hash-output" readonly></textarea>
+      </details>
+    </section>
+
+    <details class="panel">
+      <summary>验证已有配置（排错工具）</summary>
+      <p>只有排查旧配置或 Edge 密码时才需要。内容仅在当前页面内存处理。</p>
       <div class="field">
         <label for="verify-hostname">正在访问的完整域名</label>
         <input id="verify-hostname" type="text" placeholder="license.demo.example.com" autocomplete="off">
@@ -188,7 +271,7 @@
       </div>
       <button id="verify-button" type="button">检查域名、应用映射和密码</button>
       <p class="status" id="verify-status" role="status"></p>
-    </section>
+    </details>
 
     <script>
       const encoder = new TextEncoder();
@@ -216,16 +299,27 @@
         'x-vercel-protection-bypass'
       ]);
 
+      document.querySelector('#route-hostname').addEventListener('input', syncDerivedDomain);
+      document.querySelector('#route-edge-access').addEventListener('change', syncEdgeAccessFields);
+      syncDerivedDomain();
+      syncEdgeAccessFields();
+
       document.querySelector('#hash-button').addEventListener('click', async () => {
         const password = document.querySelector('#password').value;
         const status = document.querySelector('#hash-status');
+        status.dataset.error = 'true';
 
         if (!password || password.length > 256) {
           status.textContent = '请输入 1–256 个字符的密码。';
           return;
         }
 
-        const secret = document.querySelector('#hash-secret').value;
+        let secret = document.querySelector('#hash-secret').value.trim();
+
+        if (!secret) {
+          secret = generateRandomSecret();
+          document.querySelector('#hash-secret').value = secret;
+        }
 
         if (secret.length < 32) {
           status.textContent = '请填写至少 32 个字符的 ROUTE_SESSION_SECRET。';
@@ -240,8 +334,10 @@
           toBase64Url(digest)
         ].join('$');
         document.querySelector('#route-password-hash').value = document.querySelector('#hash-output').value;
+        document.querySelector('#secret-output').value = secret;
+        document.querySelector('#verify-secret').value = secret;
         status.dataset.error = 'false';
-        status.textContent = '已生成。';
+        status.textContent = '登录配置已生成，无需手工处理 passwordHash。';
       });
 
       document.querySelector('#secret-button').addEventListener('click', () => {
@@ -249,8 +345,10 @@
         document.querySelector('#secret-output').value = encoded;
         document.querySelector('#hash-secret').value = encoded;
         document.querySelector('#verify-secret').value = encoded;
+        document.querySelector('#hash-output').value = '';
+        document.querySelector('#route-password-hash').value = '';
         document.querySelector('#secret-status').dataset.error = 'false';
-        document.querySelector('#secret-status').textContent = '已生成。';
+        document.querySelector('#secret-status').textContent = '已生成。请重新生成登录配置和部署配置。';
       });
 
       document.querySelector('#origin-secret-button').addEventListener('click', () => {
@@ -258,7 +356,7 @@
         document.querySelector('#origin-secret-output').value = encoded;
         document.querySelector('#route-origin-secret').value = encoded;
         document.querySelector('#origin-secret-status').dataset.error = 'false';
-        document.querySelector('#origin-secret-status').textContent = '已生成。';
+        document.querySelector('#origin-secret-status').textContent = '已生成。请重新点击“生成部署配置”。';
       });
 
       document.querySelector('#route-generate-button').addEventListener('click', () => {
@@ -275,9 +373,17 @@
             2
           );
           document.querySelector('#environment-output').value = generated.environment;
-          document.querySelector('#wrangler-command-output').value = generated.commands;
+          document.querySelector('#wrangler-command-output').value = generated.deployCommand;
+          document.querySelector('#verify-command-output').value = generated.verifyCommands;
+          document.querySelector('#generated-hostname').textContent = generated.hostname;
+          document.querySelector('#generated-vars').textContent = generated.variableNames.join(', ');
+          document.querySelector('#generated-secret-names').textContent = generated.secretNames.join(', ');
+          document.querySelector('#generated-origin-binding').textContent = generated.originBinding || '未启用';
+          document.querySelector('#waf-step').hidden = !generated.originBinding;
+          document.querySelector('#deployment-result').dataset.visible = 'true';
           status.dataset.error = 'false';
-          status.textContent = '已生成。Secret 仅保留在当前页面内存中，请通过 Wrangler 标准输入部署。';
+          status.textContent = '配置已生成。下面按 1–4 步操作即可，不需要手工创建环境变量。';
+          document.querySelector('#deployment-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
         } catch (error) {
           status.textContent = error.message;
         }
@@ -358,9 +464,8 @@
 
       function generateProductionConfiguration() {
         const workerName = readValue('#route-worker-name');
-        const alias = readValue('#route-alias').toLowerCase();
         const hostname = parseDomainInput(readValue('#route-hostname'), 'Custom Domain');
-        const baseDomain = parseBaseDomain(readValue('#route-base-domain'));
+        const { alias, baseDomain } = deriveGatewayDomain(hostname);
         const target = parseTarget(readValue('#route-target'));
         const deliveryMode = readValue('#route-delivery-mode');
         const proxyProfile = readValue('#route-proxy-profile');
@@ -375,17 +480,8 @@
           throw new Error('Worker 名称只能包含小写字母、数字、短横线和下划线。');
         }
 
-        if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(alias)) {
-          throw new Error('Alias 必须是 3–63 位小写字母、数字或短横线。');
-        }
-
-        if (baseDomain) {
-          const suffix = `.${baseDomain}`;
-
-          if (!hostname.endsWith(suffix) || hostname.slice(0, -suffix.length) !== alias) {
-            throw new Error('Custom Domain 必须等于 alias + ROUTE_BASE_DOMAIN。');
-          }
-        }
+        document.querySelector('#route-alias').value = alias;
+        document.querySelector('#route-base-domain').value = baseDomain;
 
         if (!Number.isInteger(ttlSeconds) || ttlSeconds < 300 || ttlSeconds > 604800) {
           throw new Error('Session TTL 必须是 300–604800 之间的整数。');
@@ -418,7 +514,7 @@
 
         if (edgeAccessMode === 'required') {
           const passwordHash = readValue('#route-password-hash');
-          const sessionSecret = document.querySelector('#secret-output').value.trim();
+          const sessionSecret = readValue('#hash-secret');
 
           validatePasswordHash(passwordHash);
 
@@ -431,6 +527,7 @@
         }
 
         const originProtection = { mode: originProtectionMode };
+        document.querySelector('#origin-secret-output').value = '';
 
         if (originProtectionMode === 'required') {
           const headerName = readValue('#route-origin-header').toLowerCase();
@@ -454,6 +551,7 @@
             throw new Error('项目 Origin Secret 至少需要 16 个字符。');
           }
 
+          document.querySelector('#origin-secret-output').value = originSecret;
           document.querySelector('#route-secret-binding').value = secretBinding;
           originProtection.headerName = headerName;
           originProtection.secretBinding = secretBinding;
@@ -471,47 +569,61 @@
           cachePolicy,
           cookieDomainPolicy
         };
-        const routeJson = JSON.stringify({ [alias]: route });
+        const existingProjectsValue = readValue('#route-existing-projects');
+        const projects = existingProjectsValue ? parseProjects(existingProjectsValue) : {};
+
+        for (const [existingAlias, existingProject] of Object.entries(projects)) {
+          if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(existingAlias)) {
+            throw new Error(`已有项目 Alias“${existingAlias}”格式无效。`);
+          }
+
+          validateProject(existingProject);
+        }
+
+        projects[alias] = route;
+        const routeJson = JSON.stringify(projects);
         secrets.ROUTE_PROJECTS_JSON = routeJson;
 
         const environmentLines = [
-          `ROUTE_PROJECTS_JSON=${routeJson}`,
-          ...Object.entries(secrets)
-            .filter(([name]) => name !== 'ROUTE_PROJECTS_JSON')
-            .map(([name, value]) => `${name}=${value}`),
-          `ROUTE_SESSION_TTL_SECONDS=${ttlSeconds}`
+          '# 普通变量（Wrangler --var 自动配置）',
+          `ROUTE_BASE_DOMAIN=${baseDomain}`,
+          `ROUTE_SESSION_TTL_SECONDS=${ttlSeconds}`,
+          '',
+          '# Secrets（Wrangler --secrets-file 自动配置）',
+          ...Object.keys(secrets)
         ];
-
-        if (baseDomain) {
-          environmentLines.push(`ROUTE_BASE_DOMAIN=${baseDomain}`);
-        }
 
         const deployArguments = [
           'npx wrangler deploy',
           `  --name ${shellQuote(workerName)}`,
-          `  --domain ${shellQuote(hostname)}`,
           `  --var ${shellQuote(`ROUTE_SESSION_TTL_SECONDS:${ttlSeconds}`)}`
         ];
 
-        if (baseDomain) {
-          deployArguments.push(`  --var ${shellQuote(`ROUTE_BASE_DOMAIN:${baseDomain}`)}`);
+        deployArguments.push(`  --var ${shellQuote(`ROUTE_BASE_DOMAIN:${baseDomain}`)}`);
+
+        for (const projectAlias of Object.keys(projects)) {
+          deployArguments.push(`  --domain ${shellQuote(`${projectAlias}.${baseDomain}`)}`);
         }
 
         deployArguments.push('  --secrets-file /dev/stdin');
-        const commands = [
-          '# 运行下列命令，粘贴“Wrangler Secret JSON”，然后按 Ctrl-D。',
-          deployArguments.join(' \\\n'),
-          '',
+        const deployCommand = deployArguments.join(' \\\n');
+        const verifyCommands = [
           `npx wrangler secret list --name ${shellQuote(workerName)}`,
           `npx wrangler deployments list --name ${shellQuote(workerName)}`,
           `curl -fsS ${shellQuote(`https://${hostname}/_edge-gateway/health`)}`
         ].join('\n');
 
         return {
+          hostname,
+          baseDomain,
           routeJson,
           secrets,
           environment: environmentLines.join('\n'),
-          commands
+          deployCommand,
+          verifyCommands,
+          originBinding: originProtection.secretBinding || '',
+          variableNames: ['ROUTE_BASE_DOMAIN', 'ROUTE_SESSION_TTL_SECONDS'],
+          secretNames: Object.keys(secrets)
         };
       }
 
@@ -520,10 +632,62 @@
           '#route-json-output',
           '#secret-bulk-output',
           '#environment-output',
-          '#wrangler-command-output'
+          '#wrangler-command-output',
+          '#verify-command-output'
         ]) {
           document.querySelector(selector).value = '';
         }
+
+        document.querySelector('#deployment-result').dataset.visible = 'false';
+      }
+
+      function syncDerivedDomain() {
+        const aliasOutput = document.querySelector('#derived-alias');
+        const baseDomainOutput = document.querySelector('#derived-base-domain');
+        const rawHostname = readValue('#route-hostname');
+
+        if (!rawHostname) {
+          aliasOutput.textContent = '等待填写域名';
+          baseDomainOutput.textContent = '等待填写域名';
+          document.querySelector('#route-alias').value = '';
+          document.querySelector('#route-base-domain').value = '';
+          return;
+        }
+
+        try {
+          const hostname = parseDomainInput(rawHostname, 'Custom Domain');
+          const { alias, baseDomain } = deriveGatewayDomain(hostname);
+          aliasOutput.textContent = alias;
+          baseDomainOutput.textContent = baseDomain;
+          document.querySelector('#route-alias').value = alias;
+          document.querySelector('#route-base-domain').value = baseDomain;
+        } catch {
+          aliasOutput.textContent = '域名格式待完善';
+          baseDomainOutput.textContent = '域名格式待完善';
+          document.querySelector('#route-alias').value = '';
+          document.querySelector('#route-base-domain').value = '';
+        }
+      }
+
+      function syncEdgeAccessFields() {
+        const required = readValue('#route-edge-access') === 'required';
+        document.querySelector('#edge-access-fields').hidden = !required;
+      }
+
+      function deriveGatewayDomain(hostname) {
+        const separatorIndex = hostname.indexOf('.');
+        const alias = hostname.slice(0, separatorIndex);
+        const baseDomain = hostname.slice(separatorIndex + 1);
+
+        if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(alias)) {
+          throw new Error('域名第一段会作为 Alias，必须是 3–63 位小写字母、数字或短横线。');
+        }
+
+        if (!baseDomain.includes('.')) {
+          throw new Error('完整域名必须包含 Alias 和有效的基础域名，例如 data.preview.example.com。');
+        }
+
+        return { alias, baseDomain };
       }
 
       function readValue(selector) {
@@ -539,6 +703,9 @@
           value.includes('/') ||
           value.includes('*') ||
           value.includes(':') ||
+          value.startsWith('.') ||
+          value.endsWith('.') ||
+          value.includes('..') ||
           !/^[a-z0-9.-]+$/.test(value) ||
           !value.includes('.')
         ) {

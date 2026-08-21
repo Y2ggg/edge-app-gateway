@@ -34,7 +34,7 @@ npm run deploy:check
 
 3. 为每个 Vercel 项目分别生成至少 32 个随机字符的 Origin Secret，禁止复用。
 4. 按[配置协议](./docs/CONFIGURATION.md)准备完整 `ROUTE_PROJECTS_JSON`。配置只能写 Binding 名，不能写 Origin Secret 值。
-5. 可在本地打开 `tools/config-generator.html` 生成 Session/Origin Secret、密码散列、完整路由 JSON、临时环境变量和 Wrangler 原子部署命令。工具不会发送网络请求或写入浏览器存储；包含 Secret 的输出只通过 Wrangler 标准输入使用，不保存到仓库或普通文件。
+5. 可在本地打开 `tools/config-generator.html`，默认只填写用户访问域名和 Vercel Production URL。工具从完整域名自动推导 alias 与 `ROUTE_BASE_DOMAIN`，自动生成 Binding 和 Secret，并按顺序给出 Wrangler 原子部署、Vercel WAF 和验收步骤；无需在 Cloudflare Dashboard 逐项创建环境变量。工具不会发送网络请求或写入浏览器存储，包含 Secret 的输出只通过 Wrangler 标准输入使用，不保存到仓库或普通文件。新增第二个项目时，在折叠的高级设置中粘贴受控保存的现有 `ROUTE_PROJECTS_JSON`，生成器会保留旧项目并生成全部 Custom Domain 参数。
 
 示例仅使用占位符：
 
