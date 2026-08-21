@@ -38,7 +38,7 @@
 
     <section>
       <h2>应用密码散列</h2>
-      <p>每个应用使用独立密码，但必须填写线上使用的同一个会话密钥。</p>
+      <p>仅 Edge Access 为 required 的应用需要独立密码，并使用线上相同的会话密钥。</p>
       <label for="password">应用访问密码</label>
       <input id="password" type="password" maxlength="256" autocomplete="new-password">
       <div class="field">
@@ -64,7 +64,7 @@
       </div>
       <div class="field">
         <label for="verify-projects">ROUTE_PROJECTS_JSON 的 Value</label>
-        <textarea id="verify-projects" placeholder='{"portal":{"target":"https://portal-app.vercel.app","passwordHash":"hmac-sha256$..."}}'></textarea>
+        <textarea id="verify-projects" placeholder='{"portal":{"target":"https://portal-app.vercel.app","deliveryMode":"proxy","proxyProfile":"fullstack","requestOriginPolicy":"rewrite-to-upstream","edgeAccess":{"mode":"required","passwordHash":"hmac-sha256$..."},"originProtection":{"mode":"required","headerName":"x-edge-app-gateway-origin","secretBinding":"ORIGIN_SECRET_PORTAL"},"allowedMethods":["GET","HEAD","POST","OPTIONS"]}}'></textarea>
       </div>
       <div class="field">
         <label for="verify-password">本次输入的明文密码</label>
@@ -146,9 +146,17 @@
             throw new Error(`域名前缀“${alias}”在 ROUTE_PROJECTS_JSON 中不存在。`);
           }
 
+          validateProject(project);
+
+          if (project.edgeAccess.mode === 'disabled') {
+            status.dataset.error = 'false';
+            status.textContent = `检查通过：域名匹配应用“${alias}”，Edge Access 已禁用。`;
+            return;
+          }
+
           const password = document.querySelector('#verify-password').value;
           const secret = document.querySelector('#verify-secret').value;
-          const matches = await verifyPassword(password, project.passwordHash, secret);
+          const matches = await verifyPassword(password, project.edgeAccess.passwordHash, secret);
 
           if (!matches) {
             throw new Error(`域名已匹配应用“${alias}”，但密码与 passwordHash 不匹配。`);
@@ -234,6 +242,55 @@
         }
 
         return projects;
+      }
+
+      function validateProject(project) {
+        if (!project || Array.isArray(project) || typeof project !== 'object') {
+          throw new Error('匹配到的应用配置必须是对象。');
+        }
+
+        if (!['proxy', 'redirect'].includes(project.deliveryMode)) {
+          throw new Error('deliveryMode 必须是 proxy 或 redirect。');
+        }
+
+        if (!['static', 'fullstack'].includes(project.proxyProfile)) {
+          throw new Error('proxyProfile 必须是 static 或 fullstack。');
+        }
+
+        const requestOriginPolicy = project.requestOriginPolicy === undefined
+          ? 'preserve'
+          : project.requestOriginPolicy;
+
+        if (!['preserve', 'rewrite-to-upstream'].includes(requestOriginPolicy)) {
+          throw new Error('requestOriginPolicy 必须是 preserve 或 rewrite-to-upstream。');
+        }
+
+        if (project.deliveryMode === 'redirect' && requestOriginPolicy !== 'preserve') {
+          throw new Error('redirect 不能使用 Origin 改写策略。');
+        }
+
+        if (!['disabled', 'required'].includes(project.edgeAccess?.mode)) {
+          throw new Error('edgeAccess.mode 必须是 disabled 或 required。');
+        }
+
+        if (!['disabled', 'required'].includes(project.originProtection?.mode)) {
+          throw new Error('originProtection.mode 必须是 disabled 或 required。');
+        }
+
+        if (!Array.isArray(project.allowedMethods) || project.allowedMethods.length === 0) {
+          throw new Error('allowedMethods 必须是非空数组。');
+        }
+
+        if (
+          project.originProtection.mode === 'required' &&
+          (!project.originProtection.headerName || !project.originProtection.secretBinding)
+        ) {
+          throw new Error('源站保护为 required 时必须填写 headerName 和 secretBinding。');
+        }
+
+        if (project.deliveryMode === 'redirect' && project.originProtection.mode === 'required') {
+          throw new Error('redirect 不能与 required 源站保护同时使用。');
+        }
       }
 
       async function verifyPassword(password, encodedHash, secret) {

@@ -1,30 +1,28 @@
-const REQUEST_HEADER_ALLOWLIST = [
-  'accept',
-  'accept-language',
-  'if-match',
-  'if-modified-since',
-  'if-none-match',
-  'if-unmodified-since',
-  'range',
-  'user-agent'
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade'
+]);
+
+const FORWARDED_HEADERS = [
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-port',
+  'x-forwarded-proto'
 ];
 
-const RESPONSE_HEADER_ALLOWLIST = [
-  'accept-ranges',
-  'content-disposition',
-  'content-language',
-  'content-range',
-  'content-security-policy',
-  'content-type',
-  'cross-origin-embedder-policy',
-  'cross-origin-opener-policy',
-  'cross-origin-resource-policy',
-  'etag',
-  'last-modified',
-  'permissions-policy',
-  'service-worker-allowed',
-  'x-frame-options'
-];
+export class RequestOriginPolicyError extends Error {
+  constructor() {
+    super('Request Origin is not allowed by the configured policy');
+    this.name = 'RequestOriginPolicyError';
+  }
+}
 
 export function buildUpstreamUrl(target, requestPath, rawQuery = '') {
   const targetUrl = new URL(target);
@@ -43,33 +41,154 @@ export function buildUpstreamUrl(target, requestPath, rawQuery = '') {
   return targetUrl;
 }
 
-export function buildUpstreamHeaders(headers) {
-  const upstreamHeaders = new Headers();
+export function buildUpstreamHeaders(headers, options = {}) {
+  const upstreamHeaders = new Headers(headers || {});
+  const connectionHeaders = String(upstreamHeaders.get('connection') || '')
+    .split(',')
+    .map(name => name.trim().toLowerCase())
+    .filter(Boolean);
 
-  for (const name of REQUEST_HEADER_ALLOWLIST) {
-    const value = readHeader(headers, name);
+  for (const name of [...HOP_BY_HOP_HEADERS, ...connectionHeaders]) {
+    upstreamHeaders.delete(name);
+  }
 
-    if (value) {
-      upstreamHeaders.set(name, value);
+  upstreamHeaders.delete('host');
+
+  for (const name of FORWARDED_HEADERS) {
+    upstreamHeaders.delete(name);
+  }
+
+  for (const [name] of upstreamHeaders) {
+    if (name.toLowerCase().startsWith('x-edge-app-gateway-origin')) {
+      upstreamHeaders.delete(name);
     }
   }
 
-  upstreamHeaders.set('accept-encoding', 'identity');
+  upstreamHeaders.delete('x-vercel-protection-bypass');
+  upstreamHeaders.delete('x-vercel-set-bypass-cookie');
+
+  if (options.originHeaderName) {
+    upstreamHeaders.delete(options.originHeaderName);
+  }
+
+  const cookie = removeCookie(
+    upstreamHeaders.get('cookie'),
+    options.sessionCookieName || 'route_session'
+  );
+
+  if (cookie) {
+    upstreamHeaders.set('cookie', cookie);
+  } else {
+    upstreamHeaders.delete('cookie');
+  }
+
+  if (options.clientHost) {
+    upstreamHeaders.set('x-forwarded-host', options.clientHost);
+  }
+
+  upstreamHeaders.set('x-forwarded-proto', 'https');
+
+  if (options.clientIp) {
+    upstreamHeaders.set('x-forwarded-for', options.clientIp);
+  }
+
+  if (options.originHeaderName && options.originSecret) {
+    upstreamHeaders.set(options.originHeaderName, options.originSecret);
+  }
+
+  applyRequestOriginPolicy(upstreamHeaders, options);
+
   return upstreamHeaders;
 }
 
-export function copyUpstreamHeaders(upstreamHeaders, response) {
-  for (const name of RESPONSE_HEADER_ALLOWLIST) {
-    const value = upstreamHeaders.get(name);
+export function applyRequestOriginPolicy(headers, options = {}) {
+  if (options.requestOriginPolicy !== 'rewrite-to-upstream') {
+    return;
+  }
 
-    if (value) {
-      response.setHeader(name, value);
+  const clientOrigin = parseExpectedOrigin(options.clientOrigin);
+  const upstreamOrigin = parseExpectedOrigin(options.upstreamOrigin);
+  const requestOrigin = headers.get('origin');
+
+  if (requestOrigin) {
+    if (!isSerializedOrigin(requestOrigin, clientOrigin)) {
+      throw new RequestOriginPolicyError();
+    }
+
+    headers.set('origin', upstreamOrigin);
+  }
+
+  const referer = headers.get('referer');
+
+  if (!referer) {
+    return;
+  }
+
+  let refererUrl;
+
+  try {
+    refererUrl = new URL(referer);
+  } catch {
+    return;
+  }
+
+  if (
+    ['http:', 'https:'].includes(refererUrl.protocol) &&
+    refererUrl.origin === clientOrigin
+  ) {
+    headers.set(
+      'referer',
+      `${upstreamOrigin}${refererUrl.pathname}${refererUrl.search}${refererUrl.hash}`
+    );
+  }
+}
+
+export function copyUpstreamResponseHeaders(upstreamHeaders) {
+  const headers = new Headers();
+  const connectionHeaders = String(upstreamHeaders.get('connection') || '')
+    .split(',')
+    .map(name => name.trim().toLowerCase())
+    .filter(Boolean);
+  const blocked = new Set([...HOP_BY_HOP_HEADERS, ...connectionHeaders, 'set-cookie']);
+
+  upstreamHeaders.forEach((value, name) => {
+    if (!blocked.has(name.toLowerCase())) {
+      headers.append(name, value);
+    }
+  });
+
+  return headers;
+}
+
+export function getSetCookieValues(headers) {
+  if (typeof headers?.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+
+  if (typeof headers?.getAll === 'function') {
+    try {
+      return headers.getAll('Set-Cookie');
+    } catch {
+      // Fall through for standards-only Headers implementations.
     }
   }
 
-  response.setHeader('Cache-Control', 'private, no-store');
-  response.setHeader('Referrer-Policy', 'no-referrer');
-  response.setHeader('X-Content-Type-Options', 'nosniff');
+  const combined = headers?.get?.('set-cookie');
+  return combined ? splitCombinedSetCookie(combined) : [];
+}
+
+export function rewriteSetCookieDomain(setCookie, hostname, policy = 'strip') {
+  const domainPattern = /;\s*domain\s*=\s*[^;]*/i;
+
+  if (!domainPattern.test(setCookie)) {
+    return setCookie;
+  }
+
+  if (policy === 'rewrite') {
+    return setCookie.replace(domainPattern, `; Domain=${hostname}`);
+  }
+
+  return setCookie.replace(domainPattern, '');
 }
 
 export function rewriteLocation(location, upstreamUrl, proxyOrigin) {
@@ -99,11 +218,19 @@ export function sanitizeNextPath(rawPath) {
     return '/';
   }
 
-  if (nextPath.startsWith('/__route/')) {
+  if (nextPath.startsWith('/_edge-gateway/')) {
     return '/';
   }
 
   return nextPath;
+}
+
+export function removeCookie(rawCookie, name) {
+  return String(rawCookie || '')
+    .split(';')
+    .map(part => part.trim())
+    .filter(part => part && part.slice(0, part.indexOf('=')).trim() !== name)
+    .join('; ');
 }
 
 function normalizeRequestPath(rawPath) {
@@ -116,11 +243,45 @@ function normalizeRequestPath(rawPath) {
   return path;
 }
 
-function readHeader(headers, name) {
-  if (typeof headers?.get === 'function') {
-    return headers.get(name) || '';
+function parseExpectedOrigin(value) {
+  try {
+    return new URL(value).origin;
+  } catch {
+    throw new TypeError('Origin policy requires valid client and upstream origins');
+  }
+}
+
+function isSerializedOrigin(value, expectedOrigin) {
+  if (value === 'null' || value.includes(' ') || value.includes(',')) {
+    return false;
   }
 
-  const value = headers?.[name] ?? headers?.[name.toLowerCase()];
-  return Array.isArray(value) ? value[0] : String(value || '');
+  try {
+    const parsed = new URL(value);
+    return value === parsed.origin && parsed.origin === expectedOrigin;
+  } catch {
+    return false;
+  }
+}
+
+function splitCombinedSetCookie(value) {
+  const cookies = [];
+  let start = 0;
+  let inExpires = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const remainder = value.slice(index).toLowerCase();
+
+    if (remainder.startsWith('expires=')) {
+      inExpires = true;
+    } else if (inExpires && value[index] === ';') {
+      inExpires = false;
+    } else if (value[index] === ',' && !inExpires) {
+      cookies.push(value.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+
+  cookies.push(value.slice(start).trim());
+  return cookies.filter(Boolean);
 }

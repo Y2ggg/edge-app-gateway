@@ -1,59 +1,75 @@
 # 故障排查
 
-先访问当前域名的健康接口：
+先访问当前自定义域名：
 
 ```text
-https://项目域名/__route/health
+https://项目域名/_edge-gateway/health
 ```
 
-预期包含 `"build":"2026-08-03-gateway-v3"`。构建编号不符时，先确认 Edit code 已 Deploy、最新 Deployment 承担 Production 流量，并确认 Custom Domain 绑定的是同一个 Worker。
+预期 build 为 `2026-08-21-gateway-v5`。不符时先确认最新 Dashboard 包或 Wrangler Deployment 已进入 Production，Custom Domain 绑定到同一 Worker。
 
-## 域名和 HTTPS
+## Gateway 配置错误
+
+`EDGE_CONFIGURATION_ERROR` 表示 Worker 在发起上游请求前拒绝了不安全配置。检查：
+
+- `ROUTE_PROJECTS_JSON` 是否使用新协议，是否仍残留旧顶层 `passwordHash`/`rewriteOrigins`。
+- `edgeAccess=required` 是否有 passwordHash 和有效的 `ROUTE_SESSION_SECRET`。
+- `originProtection=required` 的 `secretBinding` 是否与 Cloudflare Secret Binding 名完全一致，值是否至少 16 个字符。
+- 上游按 Host 校验 Origin 时，是否设置 `requestOriginPolicy: rewrite-to-upstream`。
+- redirect 是否错误搭配 required 源站保护或写方法。
+- 多应用的 `ROUTE_BASE_DOMAIN`、Custom Domain 前缀和 alias 是否一致。
+
+日志只应出现错误类别，不能打印 JSON、Binding 名、密码、Hash、Session 或 Secret 值。
+
+## 登录问题
 
 | 现象 | 检查 |
 | --- | --- |
-| `ERR_SSL_VERSION_OR_CIPHER_MISMATCH` | 必须添加精确 Custom Domain，等待状态 Active；不要使用通配 Custom Domain |
-| 提示修改为 Vercel nameserver | 当前操作位置不对；域名应绑定到 Cloudflare Worker，而不是 Vercel DNS |
-| 正确和错误子域行为相同 | 核对 `ROUTE_BASE_DOMAIN`、JSON alias 和实际 Custom Domain |
-| 修改代码或变量后无变化 | 在 Deployments 中确认最新版本已进入 Production，并检查健康接口 build |
+| 登录 POST 总是失败 | Origin 必须等于当前 HTTPS Origin；缺少 Origin 时 Referer 必须同源 |
+| 正确密码仍失败 | 散列和线上验证必须使用同一个 `ROUTE_SESSION_SECRET` |
+| 429 | 同一 IP+alias 失败次数过多，等待 Retry-After；同时检查 Rate Limiter 配置 |
+| 登录后仍返回 401 | 浏览器是否接受 `Secure; HttpOnly; SameSite=Lax; Path=/` 的 `route_session`，Host 是否变化 |
+| 上游看到了 `route_session` | 确认运行 build v4，并检查是否是上游自己设置了同名 Cookie |
 
-## 密码始终失败
+未知 alias、错误密码和安全校验失败对浏览器显示相同消息，日志也不会输出具体原因。
 
-1. 确认散列以 `hmac-sha256$` 开头，而不是旧的 `pbkdf2$` 或 `scrypt$`。
-2. 确认生成散列和线上验证使用同一个 `ROUTE_SESSION_SECRET`。
-3. 使用离线 [`../tools/config-generator.html`](../tools/config-generator.html) 检查完整域名、基础域、路由表、明文密码和密钥。
-4. 查看 **Observability → Logs → Live logs**，但不要复制敏感配置。
+## 上游应用认证和 Cookie
 
-旧版出现 `pbkdf2-derive: NotSupportedError` 时，说明仍在运行 PBKDF2 版本；部署最新单文件包并重新生成 HMAC 散列。正常表单 Origin 应等于当前 HTTPS Origin。若日志为 `origin-mismatch`，检查是否仍有旧验证页发送 `Origin: null`。
+上游 401/403 现在是正常业务响应，不代表 Gateway 故障。若页面显示上游 Access Gate，说明 `edgeAccess=disabled` 或 Gateway 验证后已经正常进入上游。
 
-日志可能记录以下非敏感原因码：
+上游登录/退出返回 `ORIGIN_NOT_ALLOWED` 时，检查路由是否启用了 `rewrite-to-upstream`，并在上游日志中确认收到的 Origin 是 Vercel target Origin、Referer 路径仍完整、`X-Forwarded-Host` 是用户自定义 Host。Gateway 返回 `EDGE_ORIGIN_NOT_ALLOWED` 则表示客户端发送了跨站、opaque 或格式异常的 Origin；这是边缘安全拒绝，不能通过放宽为“全部重写”绕过。
 
-- `origin-mismatch`
-- `route-not-resolved`
-- `project-not-found`
-- `password-mismatch`
+应用登录循环时检查 Network：
 
-浏览器对这些情况始终只显示“无法访问”。
+- 请求 Cookie 中应用 Session 是否存在；Gateway 只应删除 `route_session`。
+- 上游是否返回多个 Set-Cookie，是否都到达浏览器。
+- 上游显式 `Domain=*.vercel.app` 时，按需将 `cookieDomainPolicy` 设为 `strip` 或 `rewrite`。
+- 同上游 Location 应改写为当前自定义域名；跳往外部身份提供商的 Location 会保留。
 
-## 验证通过但项目无法加载
+## POST、API 和流式问题
 
-- 上游返回 401/404：关闭 Vercel Deployment Protection，并确认 target 指向公开 Production 部署。
-- JS 请求返回 HTML：目标资源不存在或被上游重写到 SPA 页面；检查 Vercel 构建输出和路由。
-- 同源 POST/API 返回 405：本 Worker 只代理静态 GET/HEAD；API 需要改为浏览器直连独立地址或扩展服务端代理设计。
-- 控制台只有 Cloudflare Insights CSP 警告：通常不影响项目，可关闭 Web Analytics/Browser Insights 后复测。
+405 时查看响应 `Allow`，并确认路由 `allowedMethods` 和 `proxyProfile`。fullstack 才能允许写方法；static 仅允许 GET、HEAD、OPTIONS。
 
-## 所有资源 200 但页面白屏
+API 上游连接失败应返回 502 JSON `EDGE_UPSTREAM_UNAVAILABLE`。上游已经返回的 400/401/403/404/409/422/429/500/502/504 必须保留原正文；若变成 HTML，确认请求是否误打到旧 Worker。
 
-若 `rewriteOrigins` 已为 `false`，JS 状态为 200、类型为 JavaScript，且错误位于 `vendor-*.js` 内部，优先诊断上游项目的生产构建，而不是路由 Worker：
+NDJSON/SSE 延迟时检查：
 
-```bash
-npm run build
-npm run preview
-```
+- 上游是否在每块后主动 flush，而不是应用框架自身缓冲。
+- Content-Type 是否是 `application/x-ndjson`、`application/ndjson`、`application/json-seq` 或 `text/event-stream`。
+- 中间 CDN、浏览器客户端或命令行工具是否缓冲输出；curl 可使用 `--no-buffer`。
+- 响应 `Cache-Control` 应为 `no-store`。
 
-本地 `npm run dev` 正常不能证明生产 bundle 正常。重点检查 Vite/Rolldown 的 `manualChunks`、vendor 分包插件、CommonJS 循环依赖，以及 Vercel 与本地的 Node、包管理器、锁文件和 Build Command 是否一致。清除 Vercel Build Cache 后重新部署，并避免直接修改压缩后的 vendor 文件。
+## 源站 WAF 问题
 
-## 本地维护检查
+通过自定义域名也被 Vercel 拒绝时，先把 WAF 保持在 Log，核对该项目 Header 名、Worker `secretBinding` 和 Vercel 规则值。不要在 curl、日志或工单中输出正确 Secret。
+
+直连 Vercel 仍成功时，分别测试 Header 缺失和错误值。如果缺失 Header 没有命中 `Does not equal`，使用“正确 Header Allow/Bypass + 其他全部 Deny”两条规则。静态资源和 API 必须与页面同样被拒绝。
+
+## 缓存问题
+
+只有无 Authorization、无应用 Cookie、无 Set-Cookie 的 200 静态资源会在 `assets-only` 下保留或获得公共缓存。HTML、`/api`、写方法、NDJSON/SSE 和应用会话请求均应 `no-store`。发现用户数据被缓存时立即将该路由改为 `cachePolicy: no-store`，清除 Cloudflare/Vercel 缓存后再定位 Content-Type、路径和 Cookie。
+
+## 本地维护
 
 ```bash
 npm run dashboard:build
@@ -62,4 +78,4 @@ npm run test:coverage
 npm run deploy:check
 ```
 
-测试失败时先修复源码或测试，不要手工编辑 `dashboard/worker.js` 来绕过差异。
+不要直接修改 `dashboard/worker.js`；修复模块源码、测试后重新生成。

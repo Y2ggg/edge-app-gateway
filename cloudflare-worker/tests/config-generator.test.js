@@ -12,6 +12,9 @@ test('keeps the configuration validator offline', () => {
   assert.match(generatorSource, /id="verify-projects"/);
   assert.match(generatorSource, /id="verify-secret"/);
   assert.match(generatorSource, /async function verifyPassword/);
+  assert.match(generatorSource, /project\.edgeAccess\.passwordHash/);
+  assert.match(generatorSource, /originProtection\.mode/);
+  assert.match(generatorSource, /requestOriginPolicy/);
   assert.match(generatorSource, /crypto\.subtle\.sign/);
   assert.doesNotMatch(generatorSource, /crypto\.subtle\.deriveBits/);
   assert.doesNotMatch(generatorSource, /\bfetch\s*\(/);

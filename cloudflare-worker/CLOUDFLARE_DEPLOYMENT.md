@@ -1,129 +1,143 @@
-# Edge App Gateway 部署手册
+# Cloudflare 与 Vercel 部署手册
 
-本文在 Cloudflare Workers 上部署 Edge App Gateway，为多个应用建立统一的边缘接入层。方案使用多个精确 Custom Domain、按 Host 分流和每应用独立密码；示例使用 `demo.example.com` 作为入口基础域，实际部署时替换为自己的域名。
+本手册将仓库内发布和外部控制台操作分开。任何真实路由表、密码、散列、域名、Session Secret 或 Origin Secret 都只进入受控配置，不进入 Git。
 
-## 1. 部署前确认
-
-- 域名所在 Zone 已托管在 Cloudflare。
-- 每个上游是公开可访问的 `https://*.vercel.app` 静态应用。
-- Vercel Deployment Protection 未阻止 Worker 访问。
-- 不创建通配 Custom Domain、通配 DNS 或 Worker Route。
-- 不选择 Pages、Static Assets、React Router 模板或 Workers for Platforms。
-
-最终访问结构示例：
-
-```text
-portal.demo.example.com → portal-app.vercel.app
-docs.demo.example.com   → docs-app.vercel.app
-```
-
-## 2. 生成密钥和应用散列
-
-推荐直接双击打开 [`tools/config-generator.html`](./tools/config-generator.html)。该页面完全离线运行，不会发送配置或密码。
-
-1. 点击“生成会话密钥”，保存 `ROUTE_SESSION_SECRET`。
-2. 为每个应用输入独立的强密码。
-3. 确认页面中的会话密钥与第 1 步一致。
-4. 生成并保存对应的 `hmac-sha256$...` 散列。
-5. 使用“验证现有配置”检查域名、应用映射、密码和密钥是否匹配。
-
-也可以使用命令行：
+## 1. 仓库发布前检查
 
 ```bash
-npm run session:secret
-npm run password:hash -- "应用访问密码" "ROUTE_SESSION_SECRET"
+npm install
+npm run dashboard:build
+npm test
+npm run test:coverage
+npm run deploy:check
 ```
 
-散列与会话密钥绑定。更换 `ROUTE_SESSION_SECRET` 时，所有应用散列都必须重新生成，现有登录会话也会失效。不要继续使用旧的 `pbkdf2$...` 或 Vercel `scrypt$...` 散列。
-
-## 3. 创建普通 Worker
-
-1. 进入 Cloudflare **Workers & Pages → Create application → Create Worker**。
-2. 选择 Hello World 或 Start from scratch 并完成首次部署。
-3. 打开 **Edit code**，删除模板代码。
-4. 将 [`dashboard/worker.js`](./dashboard/worker.js) 的全部内容粘贴进去。
-5. 点击 **Deploy**，确认该版本进入 Production。
-
-Dashboard 单文件不能与 `src/worker.js` 混用；后者包含跨文件 import，不能直接粘贴。
-
-## 4. 配置变量和应用映射
-
-进入 **Settings → Variables and Secrets**，添加：
-
-```dotenv
-ROUTE_BASE_DOMAIN=demo.example.com
-ROUTE_PROJECTS_JSON={"portal":{"target":"https://portal-app.vercel.app","passwordHash":"hmac-sha256$...","rewriteOrigins":false},"docs":{"target":"https://docs-app.vercel.app","passwordHash":"hmac-sha256$...","rewriteOrigins":false}}
-ROUTE_SESSION_SECRET=本地生成的会话密钥
-ROUTE_SESSION_TTL_SECONDS=28800
-```
-
-变量类型：
-
-| 名称 | 类型 | 说明 |
-| --- | --- | --- |
-| `ROUTE_PROJECTS_JSON` | Secret | 完整应用映射 |
-| `ROUTE_SESSION_SECRET` | Secret | 密码 pepper 和会话签名密钥 |
-| `ROUTE_BASE_DOMAIN` | Text | 多应用域名的公共后缀，不含协议和通配符 |
-| `ROUTE_SESSION_TTL_SECONDS` | Text | 可选，会话时长，默认 `28800` |
-
-JSON 键必须等于域名前缀：`portal.demo.example.com` 对应 `portal`。Alias 只能使用 3–63 位小写字母、数字和短横线。`target` 不得包含账号密码、查询参数或片段。
-
-Secret 保存后无法从 Dashboard 重新查看。请在安全位置保留应用映射副本；新增应用时必须提交包含所有现有应用的完整 JSON。
-
-## 5. 添加精确 Custom Domain
-
-对每个应用分别操作：
-
-1. 打开 Worker **Settings → Domains & Routes**。
-2. 选择 **Add → Custom Domain**，不要选择 Route。
-3. 输入完整域名，例如 `portal.demo.example.com`。
-4. 等待状态变为 **Active**。
-
-Cloudflare 会自动创建该精确域名的 DNS 记录并签发 HTTPS 证书。如果域名已有 DNS 记录，先确认它没有被其他业务使用，再处理冲突。不要填写 `*.demo.example.com`。
-
-## 6. 验证上线
-
-访问任一已绑定域名：
-
-```text
-https://portal.demo.example.com/__route/health
-```
-
-当前版本应返回：
+生产 `wrangler.jsonc` 必须保持：
 
 ```json
-{"ok":true,"build":"2026-08-03-gateway-v3","edge":"HKG"}
-```
-
-然后验证：
-
-1. 根路径进入密码页面。
-2. 错误密码、未知应用和不可用上游均只显示“无法访问”。
-3. 正确密码显示进入动画并加载应用。
-4. Network 中资源继续使用当前自定义域名。
-5. Console 没有应用自身的生产构建错误。
-
-## 7. 新增应用
-
-以 `admin.demo.example.com` 为例：
-
-1. 使用当前 `ROUTE_SESSION_SECRET` 为 admin 密码生成新散列。
-2. 在本地保存的完整 `ROUTE_PROJECTS_JSON` 中加入：
-
-```json
-"admin": {
-  "target": "https://admin-app.vercel.app",
-  "passwordHash": "hmac-sha256$...",
-  "rewriteOrigins": false
+{
+  "workers_dev": false,
+  "preview_urls": false
 }
 ```
 
-3. 用完整 JSON 替换 Dashboard 中的 Secret 并部署到 Production。
-4. 为同一 Worker 添加精确 Custom Domain `admin.demo.example.com`。
-5. 等待 Active，依次验证健康接口、错误密码和正确密码。
+本地 `wrangler dev` 不需要开放生产 Preview URL。若团队确需远程开发 Preview，请另建不参与生产部署的开发配置，不能把生产开关改回 true。
 
-## 8. 更新与回滚
+## 2. 准备配置和密钥
 
-代码更新时重新粘贴最新 `dashboard/worker.js` 并 Deploy。先通过健康接口核对 `build`，再测试登录。Cloudflare Deployments 可以回滚 Worker 代码版本；Custom Domain、DNS 和变量属于外部状态，不会随代码自动回滚。
+1. 运行 `npm run session:secret` 生成 `ROUTE_SESSION_SECRET`。只有存在 Edge Access required 路由时才需要。
+2. 为每个 required Edge Access 路由生成独立访问密码散列：
 
-遇到认证、证书、白屏或版本问题时，参阅[故障排查](./docs/TROUBLESHOOTING.md)。完整字段约束和密钥轮换规则见[配置与安全](./docs/CONFIGURATION.md)。
+   ```bash
+   npm run password:hash -- "访问密码" "ROUTE_SESSION_SECRET"
+   ```
+
+3. 为每个 Vercel 项目分别生成至少 32 个随机字符的 Origin Secret，禁止复用。
+4. 按[配置协议](./docs/CONFIGURATION.md)准备完整 `ROUTE_PROJECTS_JSON`。配置只能写 Binding 名，不能写 Origin Secret 值。
+5. 可在本地打开 `tools/config-generator.html` 检查 alias、新协议结构和 Edge 密码散列；工具不会发送网络请求。
+
+示例仅使用占位符：
+
+```json
+{
+  "portal": {
+    "target": "https://portal-app.vercel.app",
+    "deliveryMode": "proxy",
+    "proxyProfile": "fullstack",
+    "requestOriginPolicy": "rewrite-to-upstream",
+    "edgeAccess": { "mode": "disabled" },
+    "originProtection": {
+      "mode": "required",
+      "headerName": "x-edge-app-gateway-origin",
+      "secretBinding": "ORIGIN_SECRET_PORTAL"
+    },
+    "allowedMethods": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    "cachePolicy": "assets-only",
+    "cookieDomainPolicy": "strip"
+  }
+}
+```
+
+## 3. 部署 Worker
+
+Wrangler 流程：
+
+```bash
+npx wrangler secret put ROUTE_PROJECTS_JSON
+npx wrangler secret put ROUTE_SESSION_SECRET
+npx wrangler secret put ORIGIN_SECRET_PORTAL
+npm run deploy
+```
+
+只有 disabled Edge Access 路由时可以省略 `ROUTE_SESSION_SECRET`。每个 `originProtection.secretBinding` 都必须存在，否则 Worker 返回安全的 503 配置错误且不会请求上游。
+
+Dashboard 粘贴流程使用 `dashboard/worker.js`，不要粘贴带 import 的 `src/worker.js`。随后在 Settings 中添加同名变量、Secret 以及 `EDGE_LOGIN_RATE_LIMITER` Binding。Wrangler 配置使用 namespace `1001`、每分钟 5 次提交；同一账号若已占用该 namespace，可改为另一个账号内唯一的正整数，并保持 Binding 名不变。
+
+为每个 alias 添加精确 Cloudflare Custom Domain，例如 `portal.apps.example.com`。不要使用通配 Custom Domain。多应用时设置 `ROUTE_BASE_DOMAIN=apps.example.com`；单应用可以不设置。
+
+部署后访问：
+
+```text
+https://portal.apps.example.com/_edge-gateway/health
+```
+
+确认 build 为 `2026-08-21-gateway-v5`。
+
+## 4. 配置 Vercel WAF 源站保护
+
+每个项目单独配置规则，Header 名和值必须与对应 Worker 路由一致。不要使用 `x-vercel-protection-bypass` 充当普通源站密钥。
+
+第一阶段先设为 Log：
+
+```text
+IF Request Header x-edge-app-gateway-origin
+   Does not equal <该项目 Origin Secret>
+THEN Log
+```
+
+通过 Cloudflare 自定义域名访问页面、静态资源和 API，确认 Worker 请求均带正确 Header；同时直连 Vercel，确认缺失及错误 Header 都命中日志。
+
+如果实测发现“Header 缺失”不触发 Does not equal，不得切换单规则 Deny。改为两条规则：
+
+1. Header 等于正确 Secret 时 Allow/Bypass 后续源站拒绝规则。
+2. 其他所有请求 Deny。
+
+确认日志无误后才把保护切换到 Deny。然后启用 Vercel Standard Protection/Authentication 保护 Preview 和 Deployment URL。Production URL 由 WAF 拒绝直连；不要让 Vercel Protection 阻断已经携带正确项目密钥的 Worker 请求。
+
+## 5. 关闭额外入口
+
+逐项确认：
+
+- Cloudflare `workers.dev` 无法访问。
+- Cloudflare Preview URL 无法访问。
+- Vercel Production URL 在缺失或错误 Origin Secret 时被拒绝。
+- Vercel Preview/Deployment URL 由 Vercel Authentication 或 Standard Protection 保护。
+- Vercel 项目不再绑定面向用户的自定义域名。
+- Cloudflare 精确 Custom Domain 是唯一正常业务入口。
+
+这些是账号级外部状态，无法仅凭仓库测试证明；必须在真实环境记录验收结果。
+
+## 6. 线上回归
+
+将占位域名替换为受控测试目标，不要把命令输出中的敏感 Header 保存到日志：
+
+```bash
+curl -i https://project-name.vercel.app/
+curl -i -H 'x-edge-app-gateway-origin: wrong' https://project-name.vercel.app/
+curl -i https://portal.apps.example.com/
+```
+
+预期前两项被 Vercel 拒绝，第三项经 Worker 到达上游应用或它自己的 Access Gate。随后验证：
+
+- Gateway Edge Access required/disabled 两类路由。
+- 上游应用登录、退出、刷新和应用 Cookie；启用 `rewrite-to-upstream` 时确认上游不再返回 `ORIGIN_NOT_ALLOWED`。
+- GET、HEAD、POST、PUT、PATCH、DELETE、OPTIONS 与 405 Allow。
+- API JSON 错误状态不转成 HTML。
+- NDJSON/SSE 首块在流结束前到达，且 `Cache-Control: no-store`。
+- 多个 Set-Cookie、Location 和显式 Cookie Domain 行为。
+- 静态资源可缓存，API、流式、Authorization 和应用 Session 请求不缓存。
+- 直接访问 Vercel 的页面、静态资源和 API 均被拒绝。
+
+## 7. 发布和回滚
+
+代码更新时重新生成 Dashboard 包并完成四条验证命令。Wrangler 部署可按 Cloudflare Deployment 回滚代码；变量、Secret、Rate Limiter、Custom Domain 和 Vercel WAF 是外部状态，需要单独保存变更记录和回滚步骤。

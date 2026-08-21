@@ -16,14 +16,14 @@ test('keeps the Dashboard bundle standalone', () => {
 
 test('runs the Dashboard bundle as a module Worker', async () => {
   const response = await dashboardWorker.fetch(
-    new Request('https://route-test.workers.dev/__route/health'),
+    new Request('https://gateway.example.com/_edge-gateway/health'),
     {}
   );
 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     ok: true,
-    build: '2026-08-03-gateway-v3',
+    build: '2026-08-21-gateway-v5',
     edge: 'local'
   });
 });
