@@ -7,293 +7,402 @@
     <style>
       :root {
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: #172033;
-        background: #f4f7fb;
+        color: #182230;
+        background: #f5f7fa;
       }
       * { box-sizing: border-box; }
-      body { max-width: 860px; margin: 0 auto; padding: 40px 18px 72px; }
-      section, details.panel {
-        margin-bottom: 20px;
-        padding: 24px;
-        border: 1px solid #dfe5ed;
-        border-radius: 16px;
-        background: white;
-        box-shadow: 0 8px 26px rgb(15 23 42 / 4%);
-      }
-      h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -.02em; }
-      h2 { margin: 0 0 8px; font-size: 19px; }
-      h3 { margin: 22px 0 8px; font-size: 15px; }
-      p { margin: 6px 0 16px; color: #667085; line-height: 1.6; }
-      .lede { margin-bottom: 24px; }
-      label { display: block; margin-bottom: 7px; font-weight: 700; }
-      small { display: block; margin-top: 6px; color: #667085; line-height: 1.5; }
-      input, textarea, select, button { width: 100%; border-radius: 10px; font: inherit; }
-      input, textarea, select { padding: 12px 13px; border: 1px solid #cbd5e1; background: white; }
-      input:focus, textarea:focus, select:focus { outline: 3px solid #dbeafe; border-color: #2563eb; }
-      textarea { min-height: 96px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-      button { margin-top: 12px; padding: 12px; border: 0; color: white; background: #172033; cursor: pointer; font-weight: 700; }
-      button:hover { background: #26334d; }
-      button:disabled { cursor: not-allowed; opacity: .5; }
-      button.secondary { color: #172033; background: #e9edf3; }
-      button.secondary:hover:not(:disabled) { background: #dfe5ed; }
-      button.danger { color: #b42318; background: #feeceb; }
-      button.danger:hover { background: #fbd5d2; }
-      summary { cursor: pointer; font-weight: 750; }
-      details.panel > summary { font-size: 17px; }
-      details.panel[open] > summary { margin-bottom: 20px; }
-      details.subpanel { margin-top: 18px; padding: 14px 16px; border: 1px solid #e4e7ec; border-radius: 12px; }
-      details.subpanel[open] > summary { margin-bottom: 16px; }
-      .status { min-height: 22px; margin: 10px 0 0; color: #166534; font-size: 13px; }
-      .status[data-error="true"] { color: #b42318; }
+      body { max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px; }
+      button, input, textarea, select { border-radius: 9px; font: inherit; }
+      button { padding: 11px 16px; border: 0; color: white; background: #175cd3; cursor: pointer; font-weight: 700; }
+      button:hover:not(:disabled) { background: #1849a9; }
+      button:disabled { cursor: not-allowed; opacity: .48; }
+      button.secondary { color: #344054; border: 1px solid #d0d5dd; background: white; }
+      button.secondary:hover:not(:disabled) { background: #f2f4f7; }
+      button.danger { color: #b42318; border: 1px solid #fecdca; background: #fff; }
+      button.danger:hover:not(:disabled) { background: #fef3f2; }
+      input, textarea, select { width: 100%; padding: 11px 12px; border: 1px solid #d0d5dd; color: #182230; background: white; }
+      input:focus, textarea:focus, select:focus { outline: 3px solid #dbeafe; border-color: #1570ef; }
+      textarea { min-height: 104px; resize: vertical; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+      h1 { margin: 0 0 8px; font-size: 29px; letter-spacing: -.025em; }
+      h2 { margin: 0; font-size: 21px; }
+      h3 { margin: 0; font-size: 16px; }
+      p { margin: 7px 0 0; color: #667085; line-height: 1.55; }
+      label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 700; }
+      small { display: block; margin-top: 6px; color: #667085; line-height: 1.45; }
+      code { overflow-wrap: anywhere; }
+      summary { cursor: pointer; font-weight: 700; }
+      [hidden] { display: none !important; }
+
+      .page-header { margin-bottom: 22px; }
+      .lede { max-width: 790px; }
+      .wizard-nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+      .wizard-nav button { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px 14px; color: #667085; border: 1px solid #e4e7ec; background: #fff; text-align: left; }
+      .wizard-nav button:hover:not(:disabled) { background: #f9fafb; }
+      .wizard-nav button[aria-current="step"] { color: #175cd3; border-color: #84adff; background: #eff8ff; }
+      .wizard-number { display: inline-grid; flex: 0 0 26px; width: 26px; height: 26px; place-items: center; border-radius: 50%; color: #475467; background: #eaecf0; }
+      .wizard-nav button[aria-current="step"] .wizard-number { color: white; background: #175cd3; }
+      .wizard-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      .wizard-step { padding: 24px; border: 1px solid #e4e7ec; border-radius: 16px; background: white; box-shadow: 0 10px 28px rgb(16 24 40 / 5%); }
+      .step-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+      .step-heading p { max-width: 700px; }
       .field + .field { margin-top: 16px; }
       .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
       .grid .field { margin-top: 0; }
-      .button-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-      .button-row button { margin-top: 0; }
-      .callout { padding: 14px 16px; border-radius: 12px; background: #eff6ff; color: #1e3a8a; line-height: 1.55; }
-      .result { display: none; }
-      .result[data-visible="true"] { display: block; }
-      .config-list { margin: 14px 0; padding: 0; list-style: none; }
-      .config-list li { padding: 10px 0; border-bottom: 1px solid #eef2f6; }
+      .button-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+      .button-row.end { justify-content: flex-end; }
+      .status { min-height: 20px; margin-top: 10px; color: #067647; font-size: 13px; }
+      .status[data-error="true"] { color: #b42318; }
+      .callout { padding: 13px 15px; border-radius: 10px; color: #175cd3; background: #eff8ff; line-height: 1.5; }
+      .sensitive { border-color: #fda29b; background: #fffafa; }
+      details.subpanel { margin-top: 18px; padding: 14px 16px; border: 1px solid #e4e7ec; border-radius: 10px; background: #fcfcfd; }
+      details.subpanel[open] > summary { margin-bottom: 16px; }
+      .import-panel { margin-top: 20px; padding: 18px; border: 1px dashed #b2ccff; border-radius: 12px; background: #f8faff; }
+      .import-panel h3 { margin-bottom: 5px; }
+
+      .app-workspace { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; align-items: start; }
+      .project-sidebar { min-width: 0; padding: 12px; border: 1px solid #e4e7ec; border-radius: 12px; background: #f9fafb; }
+      .sidebar-heading { display: flex; align-items: center; justify-content: space-between; margin: 1px 2px 10px; }
+      .project-count { color: #667085; font-size: 13px; }
+      .project-list { display: grid; gap: 6px; max-height: 430px; overflow: auto; }
+      .project-list button { width: 100%; padding: 10px; color: #475467; border: 1px solid transparent; background: transparent; text-align: left; }
+      .project-list button:hover { background: #f2f4f7; }
+      .project-list button[aria-current="true"] { color: #175cd3; border-color: #b2ccff; background: white; box-shadow: 0 1px 2px rgb(16 24 40 / 5%); }
+      .project-list strong, .project-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .project-list small { margin-top: 2px; font-weight: 400; }
+      .project-sidebar > button { width: 100%; margin-top: 10px; }
+      .project-card { min-width: 0; padding: 20px; border: 1px solid #e4e7ec; border-radius: 12px; }
+      .project-card:not([data-active="true"]) { display: none; }
+      .project-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+      .project-header button { padding: 8px 11px; }
+      .domain-preview { margin: 14px 0 18px; padding: 10px 12px; border-radius: 9px; color: #344054; background: #f2f4f7; }
+      .project-note { margin: 12px 0 0; font-size: 13px; }
+      .sticky-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; padding: 12px; border: 1px solid #e4e7ec; border-radius: 12px; background: #fcfcfd; }
+      .sticky-actions .status { flex: 1; margin: 0; text-align: right; }
+      .generate-button { min-width: 170px; }
+
+      .result-tabs { display: flex; gap: 6px; margin-bottom: 18px; padding: 5px; border-radius: 10px; background: #f2f4f7; }
+      .result-tabs button { flex: 1; padding: 9px 12px; color: #667085; background: transparent; }
+      .result-tabs button:hover { background: #e4e7ec; }
+      .result-tabs button[aria-selected="true"] { color: #175cd3; background: white; box-shadow: 0 1px 3px rgb(16 24 40 / 12%); }
+      .result-panel { min-height: 300px; }
+      .config-list { margin: 16px 0; padding: 0; list-style: none; }
+      .config-list li { padding: 9px 0; border-bottom: 1px solid #eaecf0; }
       .config-list li:last-child { border-bottom: 0; }
-      .config-list code { overflow-wrap: anywhere; }
-      .step { margin-top: 18px; padding-top: 18px; border-top: 1px solid #e4e7ec; }
-      .step-number { display: inline-grid; width: 26px; height: 26px; margin-right: 8px; place-items: center; border-radius: 50%; color: white; background: #2563eb; font-size: 13px; }
-      .output { min-height: 118px; }
-      .sensitive { border-color: #f5c2c7; background: #fff8f8; }
-      .project-card { margin-top: 16px; padding: 20px; border: 1px solid #dfe5ed; border-radius: 14px; background: #fbfcfe; }
-      .project-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-      .project-header h3 { margin: 0; font-size: 17px; }
-      .project-header button { width: auto; margin: 0; padding: 8px 12px; }
-      .domain-preview { margin: 14px 0; padding: 11px 13px; border-radius: 10px; background: #eef4ff; color: #344054; }
-      .domain-preview code { overflow-wrap: anywhere; }
-      .waf-card { margin-top: 14px; padding: 16px; border: 1px solid #f5c2c7; border-radius: 12px; background: #fff8f8; }
-      .waf-card h3 { margin-top: 0; }
-      [hidden] { display: none !important; }
-      @media (max-width: 620px) {
-        body { padding-top: 26px; }
-        .grid, .button-row { grid-template-columns: 1fr; }
-        section, details.panel { padding: 20px; }
+      .result-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+      .command-block { margin-top: 16px; }
+      .command-block label { margin-top: 14px; }
+      .command-block button { margin-top: 8px; }
+      .waf-card { margin-top: 12px; padding: 15px; border: 1px solid #fecdca; border-radius: 10px; background: #fffafa; }
+      .waf-card p { margin-bottom: 10px; }
+
+      @media (max-width: 760px) {
+        body { padding: 22px 12px 48px; }
+        h1 { font-size: 25px; }
+        .wizard-label { font-size: 13px; }
+        .wizard-step { padding: 18px; }
+        .grid { grid-template-columns: 1fr; }
+        .app-workspace { grid-template-columns: 1fr; }
+        .project-sidebar { padding: 10px; }
+        .project-list { display: flex; max-height: none; overflow-x: auto; }
+        .project-list button { flex: 0 0 150px; }
+        .project-sidebar > button { width: auto; }
+        .sticky-actions { flex-wrap: wrap; }
+        .sticky-actions .status { order: 3; flex-basis: 100%; text-align: left; }
+      }
+      @media (max-width: 480px) {
+        .wizard-nav { gap: 5px; }
+        .wizard-nav button { justify-content: center; padding: 10px 7px; }
+        .wizard-label { display: none; }
+        .step-heading { display: block; }
+        .step-heading > button { margin-top: 12px; }
+        .result-tabs { overflow-x: auto; }
+        .result-tabs button { flex: 0 0 auto; }
+        .sticky-actions > button { flex: 1; }
       }
     </style>
   </head>
   <body>
-    <h1>Edge App Gateway 配置生成器</h1>
-    <p class="lede">一个文件管理整个 Worker 的多应用变量、Secrets 和 Custom Domains。页面完全离线运行，不发送网络请求，也不使用浏览器存储。</p>
+    <header class="page-header">
+      <h1>Edge App Gateway 配置生成器</h1>
+      <p class="lede">集中维护 Worker 的多应用配置、Secrets 和 Custom Domains。页面完全离线，不发送网络请求，也不使用浏览器存储。</p>
+    </header>
 
-    <section>
-      <h2>1. Gateway 与变量文件</h2>
-      <div class="grid">
-        <div class="field">
-          <label for="worker-name">Worker 名称</label>
-          <input id="worker-name" type="text" value="vercel-route" autocomplete="off">
-        </div>
-        <div class="field">
-          <label for="base-domain">多应用基础域名</label>
-          <input id="base-domain" type="text" placeholder="preview.example.com" autocomplete="off">
-          <small>应用入口统一为 <code>alias.基础域名</code>。</small>
-        </div>
-      </div>
+    <nav class="wizard-nav" aria-label="配置步骤">
+      <button type="button" data-step-target="1" aria-current="step">
+        <span class="wizard-number">1</span><span class="wizard-label">Gateway</span>
+      </button>
+      <button type="button" data-step-target="2">
+        <span class="wizard-number">2</span><span class="wizard-label">应用</span>
+      </button>
+      <button type="button" data-step-target="3" disabled>
+        <span class="wizard-number">3</span><span class="wizard-label">部署结果</span>
+      </button>
+    </nav>
 
-      <details class="subpanel">
-        <summary>全局高级设置</summary>
+    <main>
+      <section class="wizard-step" id="wizard-step-1" data-step="1">
+        <div class="step-heading">
+          <div>
+            <h2>Gateway 与变量文件</h2>
+            <p>先确认 Worker 和基础域名。已有配置可以直接导入继续维护。</p>
+          </div>
+        </div>
+
         <div class="grid">
           <div class="field">
-            <label for="session-ttl">Gateway Session 有效期（秒）</label>
-            <input id="session-ttl" type="number" min="300" max="604800" value="28800">
+            <label for="worker-name">Worker 名称</label>
+            <input id="worker-name" type="text" value="vercel-route" autocomplete="off">
           </div>
           <div class="field">
-            <label for="session-secret">ROUTE_SESSION_SECRET</label>
-            <input id="session-secret" type="password" autocomplete="off">
-            <small>只有至少一个应用启用 Edge 登录时需要；留空可自动生成。</small>
+            <label for="base-domain">多应用基础域名</label>
+            <input id="base-domain" type="text" placeholder="preview.example.com" autocomplete="off">
+            <small>应用入口自动组成 <code>alias.基础域名</code>。</small>
           </div>
-        </div>
-        <button id="session-secret-button" class="secondary" type="button">生成新的 Session Secret</button>
-        <p class="status" id="session-secret-status" role="status"></p>
-      </details>
-
-      <h3>导入或备份完整变量文件</h3>
-      <p>变量文件包含所有项目的 Origin Secret，属于敏感文件。仅保存在密码保险库、加密磁盘或受控 WebDAV 目录，不要提交 Git。</p>
-      <div class="field">
-        <label for="config-import-input">导入 <code>edge-app-gateway.variables.json</code></label>
-        <input id="config-import-input" type="file" accept="application/json,.json">
-      </div>
-      <div class="button-row">
-        <button id="config-export-button" class="secondary" type="button" disabled>导出完整变量文件</button>
-        <button id="config-new-button" class="secondary" type="button">清空并新建</button>
-      </div>
-      <p class="status" id="config-file-status" role="status"></p>
-    </section>
-
-    <section>
-      <h2>2. 应用列表</h2>
-      <p>每个应用只需填写 Alias 和 Vercel Production URL；入口域名、Binding 和安全默认项自动生成。</p>
-      <div id="projects-container"></div>
-      <button id="add-project-button" class="secondary" type="button">＋ 添加应用</button>
-      <button id="generate-button" type="button">生成多应用部署配置</button>
-      <p class="status" id="generate-status" role="status"></p>
-    </section>
-
-    <template id="project-template">
-      <article class="project-card" data-project>
-        <div class="project-header">
-          <h3 data-role="project-title">应用</h3>
-          <button class="danger" data-action="remove-project" type="button">删除</button>
-        </div>
-        <div class="grid">
-          <div class="field">
-            <label>应用 Alias</label>
-            <input data-field="alias" type="text" placeholder="smartdata" autocomplete="off">
-            <small>3–63 位小写字母、数字或短横线。</small>
-          </div>
-          <div class="field">
-            <label>Vercel Production URL</label>
-            <input data-field="target" type="url" placeholder="https://project-name.vercel.app" autocomplete="off">
-          </div>
-        </div>
-        <div class="domain-preview">Custom Domain：<code data-role="hostname">等待填写 Alias 和基础域名</code></div>
-        <div class="field">
-          <label>是否增加 Gateway 密码登录</label>
-          <select data-field="edge-access">
-            <option value="disabled">不需要，上游应用自己登录（推荐）</option>
-            <option value="required">需要，先通过 Gateway 密码</option>
-          </select>
-        </div>
-        <div data-role="edge-fields" hidden>
-          <div class="field">
-            <label>Gateway 访问密码</label>
-            <input data-field="password" type="password" maxlength="256" autocomplete="new-password">
-          </div>
-          <input data-field="password-hash" type="hidden">
-          <button data-action="generate-password-hash" type="button">生成该应用登录配置</button>
-          <p class="status" data-role="password-status" role="status"></p>
         </div>
 
         <details class="subpanel">
-          <summary>应用高级设置</summary>
+          <summary>全局高级设置</summary>
           <div class="grid">
             <div class="field">
-              <label>交付方式</label>
-              <select data-field="delivery-mode"><option value="proxy">反向代理</option><option value="redirect">浏览器跳转</option></select>
+              <label for="session-ttl">Gateway Session 有效期（秒）</label>
+              <input id="session-ttl" type="number" min="300" max="604800" value="28800">
             </div>
             <div class="field">
-              <label>应用类型</label>
-              <select data-field="proxy-profile"><option value="fullstack">全栈应用</option><option value="static">纯静态网站</option></select>
-            </div>
-            <div class="field">
-              <label>浏览器 Origin</label>
-              <select data-field="origin-policy"><option value="rewrite-to-upstream">安全重写到上游</option><option value="preserve">保持原值</option></select>
-            </div>
-            <div class="field">
-              <label>阻止绕过 Gateway</label>
-              <select data-field="origin-protection"><option value="required">启用（推荐）</option><option value="disabled">禁用</option></select>
-            </div>
-            <div class="field">
-              <label>缓存策略</label>
-              <select data-field="cache-policy"><option value="assets-only">仅静态资源</option><option value="no-store">全部不缓存</option></select>
-            </div>
-            <div class="field">
-              <label>上游 Cookie Domain</label>
-              <select data-field="cookie-domain-policy"><option value="strip">删除 Domain</option><option value="rewrite">改写为当前域名</option></select>
+              <label for="session-secret">ROUTE_SESSION_SECRET（可留空）</label>
+              <input id="session-secret" type="password" autocomplete="off">
+              <small>仅 Edge 登录需要；“生成全部配置”时会自动补齐。</small>
             </div>
           </div>
-          <div class="field">
-            <label>允许的 HTTP 方法</label>
-            <input data-field="methods" type="text" value="GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS" autocomplete="off">
-          </div>
-          <div class="grid">
-            <div class="field">
-              <label>源站保护 Header</label>
-              <input data-field="origin-header" type="text" value="x-edge-app-gateway-origin" autocomplete="off">
-            </div>
-            <div class="field">
-              <label>Origin Secret Binding（可留空）</label>
-              <input data-field="secret-binding" type="text" placeholder="自动按 Alias 生成" autocomplete="off">
-            </div>
-          </div>
-          <div class="field">
-            <label>Origin Secret（可留空自动生成）</label>
-            <input data-field="origin-secret" type="password" autocomplete="off">
-          </div>
-          <button class="secondary" data-action="generate-origin-secret" type="button">生成新的 Origin Secret</button>
-          <p class="status" data-role="origin-secret-status" role="status"></p>
+          <p class="status" id="session-secret-status" role="status"></p>
         </details>
-      </article>
-    </template>
 
-    <section class="result" id="deployment-result" data-visible="false">
-      <h2>3. 部署与 WAF</h2>
-      <div class="callout">推荐直接导出变量文件，然后运行 <code>npm run deploy:config -- 文件路径</code>。脚本会通过 Wrangler 一次配置代码、普通变量、Secrets 和全部 Custom Domains，不需要 Cloudflare Dashboard。</div>
-      <h3>最终配置清单</h3>
-      <ul class="config-list">
-        <li>Custom Domains：<code id="generated-hostnames"></code></li>
-        <li>普通变量：<code id="generated-vars"></code></li>
-        <li>Cloudflare Secrets：<code id="generated-secret-names"></code></li>
-      </ul>
-      <button id="config-export-result-button" type="button" disabled>下载完整变量文件（敏感）</button>
+        <div class="import-panel">
+          <h3>导入已有变量文件</h3>
+          <p>可一次恢复全部应用和 Secret。敏感文件请放在密码保险库、加密磁盘或受控 WebDAV 目录，不要提交 Git。</p>
+          <div class="field">
+            <label for="config-import-input">选择 <code>*.variables.json</code></label>
+            <input id="config-import-input" type="file" accept="application/json,.json">
+          </div>
+          <div class="button-row">
+            <button id="config-new-button" class="secondary" type="button">清空并新建</button>
+          </div>
+          <p class="status" id="config-file-status" role="status"></p>
+        </div>
 
-      <div class="step">
-        <h3><span class="step-number">1</span>使用变量文件原子部署</h3>
-        <textarea class="output" id="config-deploy-command-output" readonly></textarea>
-        <button class="secondary" data-copy="config-deploy-command-output" data-default-label="复制变量文件部署命令" type="button">复制变量文件部署命令</button>
+        <div class="button-row end">
+          <button type="button" data-step-target="2">下一步：配置应用</button>
+        </div>
+
         <details class="subpanel">
-          <summary>不导出文件：使用标准输入部署</summary>
-          <textarea class="output" id="wrangler-command-output" readonly></textarea>
-          <button class="secondary" data-copy="wrangler-command-output" data-default-label="复制 Wrangler 命令" type="button">复制 Wrangler 命令</button>
-          <p>运行上面的命令后，复制下面的 Secret JSON 粘贴到终端，再按 <code>Ctrl-D</code>。</p>
-          <textarea class="output sensitive" id="secret-bulk-output" readonly></textarea>
-          <button class="secondary" data-copy="secret-bulk-output" data-default-label="复制 Secret JSON" type="button">复制 Secret JSON</button>
+          <summary>验证已有配置（排错工具）</summary>
+          <p>只在排查旧配置或 Edge 密码时使用，内容仅在当前页面内存处理。</p>
+          <div class="grid">
+            <div class="field">
+              <label for="verify-hostname">正在访问的完整域名</label>
+              <input id="verify-hostname" type="text" placeholder="app.preview.example.com" autocomplete="off">
+            </div>
+            <div class="field">
+              <label for="verify-base-domain">ROUTE_BASE_DOMAIN</label>
+              <input id="verify-base-domain" type="text" placeholder="preview.example.com" autocomplete="off">
+            </div>
+          </div>
+          <div class="field">
+            <label for="verify-projects">ROUTE_PROJECTS_JSON 的 Value</label>
+            <textarea id="verify-projects"></textarea>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label for="verify-password">本次输入的明文密码</label>
+              <input id="verify-password" type="password" maxlength="256" autocomplete="off">
+            </div>
+            <div class="field">
+              <label for="verify-secret">ROUTE_SESSION_SECRET</label>
+              <input id="verify-secret" type="password" autocomplete="off">
+            </div>
+          </div>
+          <button id="verify-button" type="button">检查映射和密码</button>
+          <p class="status" id="verify-status" role="status"></p>
         </details>
-      </div>
+      </section>
 
-      <div class="step" id="waf-step">
-        <h3><span class="step-number">2</span>逐项目配置 Vercel WAF</h3>
-        <p>每个项目使用自己的 Secret。先配置 Log，确认 Worker Header 正确后再切换 Deny。</p>
-        <div id="waf-secrets-output"></div>
-      </div>
+      <section class="wizard-step" id="wizard-step-2" data-step="2" hidden>
+        <div class="step-heading">
+          <div>
+            <h2>应用配置</h2>
+            <p>左侧选择应用，右侧只编辑当前应用；安全密钥会在最后统一生成。</p>
+          </div>
+        </div>
 
-      <div class="step">
-        <h3><span class="step-number">3</span>运行验收命令</h3>
-        <textarea class="output" id="verify-command-output" readonly></textarea>
-        <button class="secondary" data-copy="verify-command-output" data-default-label="复制验收命令" type="button">复制验收命令</button>
-      </div>
+        <div class="app-workspace">
+          <aside class="project-sidebar" aria-label="应用列表">
+            <div class="sidebar-heading">
+              <h3>应用</h3>
+              <span class="project-count" id="project-count"></span>
+            </div>
+            <div class="project-list" id="project-list" role="list"></div>
+            <button id="add-project-button" class="secondary" type="button">＋ 添加应用</button>
+          </aside>
+          <div id="projects-container"></div>
+        </div>
 
-      <details class="subpanel">
-        <summary>查看原始配置和变量归属</summary>
-        <label for="environment-output">变量归属清单（不含 Secret 值）</label>
-        <textarea class="output" id="environment-output" readonly></textarea>
-        <label for="route-json-output">完整 ROUTE_PROJECTS_JSON</label>
-        <textarea class="output" id="route-json-output" readonly></textarea>
-        <button class="secondary" data-copy="route-json-output" data-default-label="复制路由 JSON" type="button">复制路由 JSON</button>
-      </details>
-    </section>
+        <div class="sticky-actions">
+          <button class="secondary" type="button" data-step-target="1">上一步</button>
+          <p class="status" id="generate-status" role="status"></p>
+          <button class="generate-button" id="generate-button" type="button">生成全部配置</button>
+        </div>
+      </section>
 
-    <details class="panel">
-      <summary>验证已有配置（排错工具）</summary>
-      <p>只有排查旧配置或 Edge 密码时才需要。内容仅在当前页面内存处理。</p>
-      <div class="field">
-        <label for="verify-hostname">正在访问的完整域名</label>
-        <input id="verify-hostname" type="text" placeholder="license.demo.example.com" autocomplete="off">
-      </div>
-      <div class="field">
-        <label for="verify-base-domain">ROUTE_BASE_DOMAIN</label>
-        <input id="verify-base-domain" type="text" placeholder="demo.example.com" autocomplete="off">
-      </div>
-      <div class="field">
-        <label for="verify-projects">ROUTE_PROJECTS_JSON 的 Value</label>
-        <textarea id="verify-projects"></textarea>
-      </div>
-      <div class="field">
-        <label for="verify-password">本次输入的明文密码</label>
-        <input id="verify-password" type="password" maxlength="256" autocomplete="off">
-      </div>
-      <div class="field">
-        <label for="verify-secret">ROUTE_SESSION_SECRET</label>
-        <input id="verify-secret" type="password" autocomplete="off">
-      </div>
-      <button id="verify-button" type="button">检查域名、应用映射和密码</button>
-      <p class="status" id="verify-status" role="status"></p>
-    </details>
+      <template id="project-template">
+        <article class="project-card" data-project data-active="false">
+          <div class="project-header">
+            <h3 data-role="project-title">应用</h3>
+            <button class="danger" data-action="remove-project" type="button">删除应用</button>
+          </div>
+          <div class="grid">
+            <div class="field">
+              <label>应用 Alias</label>
+              <input data-field="alias" type="text" placeholder="smartdata" autocomplete="off">
+              <small>3–63 位小写字母、数字或短横线。</small>
+            </div>
+            <div class="field">
+              <label>Vercel Production URL</label>
+              <input data-field="target" type="url" placeholder="https://project-name.vercel.app" autocomplete="off">
+            </div>
+          </div>
+          <div class="domain-preview">访问域名：<code data-role="hostname">等待填写 Alias 和基础域名</code></div>
+          <div class="field">
+            <label>Gateway 是否增加一层密码登录</label>
+            <select data-field="edge-access">
+              <option value="disabled">不增加，上游应用自行登录（推荐）</option>
+              <option value="required">增加 Gateway 密码登录</option>
+            </select>
+          </div>
+          <div data-role="edge-fields" hidden>
+            <div class="field">
+              <label>Gateway 访问密码</label>
+              <input data-field="password" type="password" maxlength="256" autocomplete="new-password">
+              <small>生成时自动转换为 passwordHash，明文密码不会导出。导入后不修改密码可留空。</small>
+            </div>
+            <input data-field="password-hash" type="hidden">
+            <p class="status" data-role="password-status" role="status"></p>
+          </div>
+
+          <details class="subpanel">
+            <summary>应用高级设置</summary>
+            <div class="callout">全栈应用默认允许 API 写方法；纯静态和跳转模式会自动调整允许的方法，避免无效组合。</div>
+            <div class="grid" style="margin-top: 16px">
+              <div class="field">
+                <label>交付方式</label>
+                <select data-field="delivery-mode"><option value="proxy">反向代理</option><option value="redirect">浏览器跳转</option></select>
+              </div>
+              <div class="field">
+                <label>应用类型</label>
+                <select data-field="proxy-profile"><option value="fullstack">全栈应用</option><option value="static">纯静态网站</option></select>
+              </div>
+              <div class="field">
+                <label>浏览器 Origin</label>
+                <select data-field="origin-policy"><option value="rewrite-to-upstream">安全重写到上游</option><option value="preserve">保持原值</option></select>
+              </div>
+              <div class="field">
+                <label>阻止绕过 Gateway</label>
+                <select data-field="origin-protection"><option value="required">启用（推荐）</option><option value="disabled">禁用</option></select>
+              </div>
+              <div class="field">
+                <label>缓存策略</label>
+                <select data-field="cache-policy"><option value="assets-only">仅静态资源</option><option value="no-store">全部不缓存</option></select>
+              </div>
+              <div class="field">
+                <label>上游 Cookie Domain</label>
+                <select data-field="cookie-domain-policy"><option value="strip">删除 Domain</option><option value="rewrite">改写为当前域名</option></select>
+              </div>
+            </div>
+            <div class="field">
+              <label>允许的 HTTP 方法</label>
+              <input data-field="methods" type="text" value="GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS" autocomplete="off">
+            </div>
+            <div data-role="origin-protection-fields">
+              <div class="grid">
+                <div class="field">
+                  <label>源站保护 Header</label>
+                  <input data-field="origin-header" type="text" value="x-edge-app-gateway-origin" autocomplete="off">
+                </div>
+                <div class="field">
+                  <label>Origin Secret Binding（可留空）</label>
+                  <input data-field="secret-binding" type="text" placeholder="按 Alias 自动生成" autocomplete="off">
+                </div>
+              </div>
+              <div class="field">
+                <label>Origin Secret（可留空）</label>
+                <input data-field="origin-secret" type="password" autocomplete="off">
+                <small>“生成全部配置”时自动补齐；Binding 仅使用大写字母、数字和下划线。</small>
+              </div>
+            </div>
+          </details>
+        </article>
+      </template>
+
+      <section class="wizard-step result" id="deployment-result" data-step="3" hidden>
+        <div class="step-heading">
+          <div>
+            <h2>部署结果</h2>
+            <p>配置已经通过整体验证，可以导出并交给 Wrangler CLI 部署。</p>
+          </div>
+          <button class="secondary" type="button" data-step-target="2">返回编辑</button>
+        </div>
+
+        <div class="result-tabs" role="tablist" aria-label="结果分类">
+          <button type="button" role="tab" data-result-tab="deployment" aria-selected="true">部署</button>
+          <button type="button" role="tab" data-result-tab="waf" aria-selected="false">Vercel WAF</button>
+          <button type="button" role="tab" data-result-tab="raw" aria-selected="false">原始配置</button>
+        </div>
+
+        <div class="result-panel" data-result-panel="deployment">
+          <div class="callout">推荐下载完整变量文件，再运行 <code>npm run deploy:config -- 文件路径</code>。脚本通过 Wrangler 一次配置代码、普通变量、Cloudflare Secrets 和全部 Custom Domains，不需要 Cloudflare Dashboard。</div>
+          <ul class="config-list">
+            <li>Custom Domains：<code id="generated-hostnames"></code></li>
+            <li>普通变量：<code id="generated-vars"></code></li>
+            <li>Cloudflare Secrets：<code id="generated-secret-names"></code></li>
+          </ul>
+          <div class="result-actions">
+            <button id="config-export-result-button" type="button" disabled>下载完整变量文件（敏感）</button>
+          </div>
+          <p class="status" id="export-status" role="status"></p>
+          <div class="command-block">
+            <label for="config-deploy-command-output">变量文件部署命令</label>
+            <textarea class="output" id="config-deploy-command-output" readonly></textarea>
+            <button class="secondary" data-copy="config-deploy-command-output" data-default-label="复制部署命令" type="button">复制部署命令</button>
+          </div>
+          <details class="subpanel">
+            <summary>验收命令</summary>
+            <textarea class="output" id="verify-command-output" readonly></textarea>
+            <button class="secondary" data-copy="verify-command-output" data-default-label="复制验收命令" type="button">复制验收命令</button>
+          </details>
+          <details class="subpanel">
+            <summary>不导出文件：使用标准输入部署</summary>
+            <textarea class="output" id="wrangler-command-output" readonly></textarea>
+            <button class="secondary" data-copy="wrangler-command-output" data-default-label="复制 Wrangler 命令" type="button">复制 Wrangler 命令</button>
+            <p>执行命令后粘贴下方 Secret JSON，再按 <code>Ctrl-D</code>。</p>
+            <textarea class="output sensitive" id="secret-bulk-output" readonly></textarea>
+            <button class="secondary" data-copy="secret-bulk-output" data-default-label="复制 Secret JSON" type="button">复制 Secret JSON</button>
+          </details>
+        </div>
+
+        <div class="result-panel" data-result-panel="waf" hidden>
+          <div class="callout">每个 Vercel 项目使用独立 Secret。WAF 先设为 Log，确认 Worker Header 正确后再切换 Deny。</div>
+          <div id="waf-secrets-output"></div>
+          <p id="waf-empty" hidden>当前应用均未启用源站保护，无需配置 WAF Secret。</p>
+        </div>
+
+        <div class="result-panel" data-result-panel="raw" hidden>
+          <label for="environment-output">变量归属清单（不含 Secret 值）</label>
+          <textarea class="output" id="environment-output" readonly></textarea>
+          <label for="route-json-output" style="margin-top: 16px">完整 ROUTE_PROJECTS_JSON</label>
+          <textarea class="output" id="route-json-output" readonly></textarea>
+          <button class="secondary" data-copy="route-json-output" data-default-label="复制路由 JSON" type="button">复制路由 JSON</button>
+        </div>
+      </section>
+    </main>
 
     <script src="./config-generator.js"></script>
   </body>

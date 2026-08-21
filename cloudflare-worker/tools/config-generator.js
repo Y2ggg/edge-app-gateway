@@ -28,15 +28,25 @@ const forbiddenOriginHeaders = new Set([
 
 let projectSequence = 0;
 let latestGenerated = null;
+let selectedProjectId = null;
+let activeStep = 1;
 
 document.querySelector('#add-project-button').addEventListener('click', () => {
   addProject();
   markOutputsStale();
 });
 
-document.querySelector('#generate-button').addEventListener('click', () => {
-  generateAndRender({ scroll: true });
+document.querySelector('#generate-button').addEventListener('click', async () => {
+  await generateAndRender();
 });
+
+for (const button of document.querySelectorAll('[data-step-target]')) {
+  button.addEventListener('click', () => showStep(Number(button.dataset.stepTarget)));
+}
+
+for (const button of document.querySelectorAll('[data-result-tab]')) {
+  button.addEventListener('click', () => activateResultTab(button.dataset.resultTab));
+}
 
 document.querySelector('#base-domain').addEventListener('input', () => {
   syncAllHostnames();
@@ -48,14 +58,7 @@ for (const selector of ['#worker-name', '#session-ttl']) {
 }
 
 document.querySelector('#session-secret').addEventListener('input', () => {
-  invalidatePasswordHashes('Session Secret 已修改，请重新生成各应用的登录配置。');
-  markOutputsStale();
-});
-
-document.querySelector('#session-secret-button').addEventListener('click', () => {
-  document.querySelector('#session-secret').value = generateRandomSecret();
-  invalidatePasswordHashes('已生成新的 Session Secret，请重新生成各应用的登录配置。');
-  setStatus('#session-secret-status', '已生成新的 Session Secret。', false);
+  invalidatePasswordHashes('Session Secret 已修改，请重新生成全部配置。');
   markOutputsStale();
 });
 
@@ -72,7 +75,6 @@ document.querySelector('#config-import-input').addEventListener('change', async 
   }
 });
 
-document.querySelector('#config-export-button').addEventListener('click', exportVariablesFile);
 document.querySelector('#config-export-result-button').addEventListener('click', exportVariablesFile);
 
 document.querySelector('#config-new-button').addEventListener('click', () => {
@@ -94,10 +96,13 @@ document.querySelector('#projects-container').addEventListener('change', event =
   if (!card) return;
 
   if (event.target.matches('[data-field="edge-access"]')) syncProjectEdgeFields(card);
+  if (event.target.matches('[data-field="delivery-mode"], [data-field="proxy-profile"], [data-field="origin-protection"]')) {
+    syncProjectOptions(card, event.target.dataset.field);
+  }
   markOutputsStale();
 });
 
-document.querySelector('#projects-container').addEventListener('click', async event => {
+document.querySelector('#projects-container').addEventListener('click', event => {
   const button = event.target.closest('[data-action]');
   const card = button?.closest('[data-project]');
   if (!button || !card) return;
@@ -105,25 +110,22 @@ document.querySelector('#projects-container').addEventListener('click', async ev
   const action = button.dataset.action;
 
   if (action === 'remove-project') {
+    const cards = [...document.querySelectorAll('[data-project]')];
+    const removedIndex = cards.indexOf(card);
     card.remove();
     if (!document.querySelector('[data-project]')) addProject();
+    const remaining = [...document.querySelectorAll('[data-project]')];
+    if (selectedProjectId === card.dataset.projectId) {
+      selectProject(remaining[Math.min(removedIndex, remaining.length - 1)]);
+    }
     updateProjectTitles();
     markOutputsStale();
-    return;
   }
+});
 
-  if (action === 'generate-origin-secret') {
-    projectField(card, 'origin-secret').value = generateRandomSecret();
-    const status = card.querySelector('[data-role="origin-secret-status"]');
-    status.dataset.error = 'false';
-    status.textContent = '已生成，请重新生成部署配置。';
-    markOutputsStale();
-    return;
-  }
-
-  if (action === 'generate-password-hash') {
-    await generateProjectPasswordHash(card);
-  }
+document.querySelector('#project-list').addEventListener('click', event => {
+  const button = event.target.closest('[data-project-select]');
+  if (button) selectProject(button.dataset.projectSelect);
 });
 
 document.addEventListener('click', async event => {
@@ -150,6 +152,7 @@ document.addEventListener('click', async event => {
 document.querySelector('#verify-button').addEventListener('click', verifyExistingConfiguration);
 
 addProject();
+showStep(1);
 
 function addProject(initial = {}) {
   if (document.querySelectorAll('[data-project]').length >= 200) {
@@ -186,8 +189,10 @@ function addProject(initial = {}) {
 
   document.querySelector('#projects-container').append(card);
   syncProjectEdgeFields(card);
+  syncProjectOptions(card);
   syncProjectHostname(card);
   updateProjectTitles();
+  selectProject(card);
   return card;
 }
 
@@ -197,12 +202,46 @@ function projectField(card, name) {
 
 function updateProjectTitles() {
   const cards = [...document.querySelectorAll('[data-project]')];
+  const list = document.querySelector('#project-list');
+  list.replaceChildren();
+
+  if (!cards.some(card => card.dataset.projectId === selectedProjectId)) {
+    selectedProjectId = cards[0]?.dataset.projectId || null;
+  }
+
   for (const [index, card] of cards.entries()) {
     const alias = projectField(card, 'alias').value.trim();
-    card.querySelector('[data-role="project-title"]').textContent = alias
-      ? `应用 ${index + 1} · ${alias}`
-      : `应用 ${index + 1}`;
+    const title = alias || `应用 ${index + 1}`;
+    card.querySelector('[data-role="project-title"]').textContent = title;
+    card.dataset.active = String(card.dataset.projectId === selectedProjectId);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.projectSelect = card.dataset.projectId;
+    button.setAttribute('role', 'listitem');
+    button.setAttribute('aria-current', String(card.dataset.projectId === selectedProjectId));
+    const name = document.createElement('strong');
+    name.textContent = title;
+    const summary = document.createElement('small');
+    summary.textContent = alias ? projectHostname(card) : 'Alias 尚未填写';
+    button.append(name, summary);
+    list.append(button);
   }
+
+  document.querySelector('#project-count').textContent = `${cards.length} 个`;
+}
+
+function selectProject(project) {
+  const projectId = typeof project === 'string' ? project : project?.dataset.projectId;
+  if (!projectId || !document.querySelector(`[data-project-id="${projectId}"]`)) return;
+  selectedProjectId = projectId;
+  updateProjectTitles();
+}
+
+function projectHostname(card) {
+  const alias = projectField(card, 'alias').value.trim().toLowerCase();
+  const baseDomain = document.querySelector('#base-domain').value.trim().toLowerCase();
+  return alias && baseDomain ? `${alias}.${baseDomain}` : '等待基础域名';
 }
 
 function syncAllHostnames() {
@@ -210,15 +249,11 @@ function syncAllHostnames() {
 }
 
 function syncProjectHostname(card) {
-  const alias = projectField(card, 'alias').value.trim().toLowerCase();
-  const baseDomain = document.querySelector('#base-domain').value.trim().toLowerCase();
   const output = card.querySelector('[data-role="hostname"]');
-
-  if (!alias || !baseDomain) {
-    output.textContent = '等待填写 Alias 和基础域名';
-  } else {
-    output.textContent = `${alias}.${baseDomain}`;
-  }
+  const hostname = projectHostname(card);
+  output.textContent = hostname === '等待基础域名' || !projectField(card, 'alias').value.trim()
+    ? '等待填写 Alias 和基础域名'
+    : hostname;
 
   updateProjectTitles();
 }
@@ -226,6 +261,57 @@ function syncProjectHostname(card) {
 function syncProjectEdgeFields(card) {
   const required = projectField(card, 'edge-access').value === 'required';
   card.querySelector('[data-role="edge-fields"]').hidden = !required;
+}
+
+function syncProjectOptions(card, changedField = '') {
+  const deliveryMode = projectField(card, 'delivery-mode');
+  const proxyProfile = projectField(card, 'proxy-profile');
+  const originPolicy = projectField(card, 'origin-policy');
+  const originProtection = projectField(card, 'origin-protection');
+  const methods = projectField(card, 'methods');
+  const redirect = deliveryMode.value === 'redirect';
+
+  if (redirect) {
+    originPolicy.value = 'preserve';
+    originProtection.value = 'disabled';
+    methods.value = 'GET, HEAD';
+  } else if (changedField === 'proxy-profile') {
+    methods.value = proxyProfile.value === 'static'
+      ? 'GET, HEAD, OPTIONS'
+      : supportedMethods.join(', ');
+  } else if (changedField === 'delivery-mode' && proxyProfile.value === 'fullstack') {
+    methods.value = supportedMethods.join(', ');
+  }
+
+  proxyProfile.disabled = redirect;
+  originPolicy.disabled = redirect;
+  originProtection.disabled = redirect;
+  card.querySelector('[data-role="origin-protection-fields"]').hidden = originProtection.value !== 'required';
+}
+
+function showStep(step) {
+  if (![1, 2, 3].includes(step)) return;
+  if (step === 3 && !latestGenerated) return;
+  activeStep = step;
+
+  for (const panel of document.querySelectorAll('[data-step]')) {
+    panel.hidden = Number(panel.dataset.step) !== step;
+  }
+  for (const button of document.querySelectorAll('.wizard-nav [data-step-target]')) {
+    const target = Number(button.dataset.stepTarget);
+    button.setAttribute('aria-current', target === step ? 'step' : 'false');
+    if (target === 3) button.disabled = !latestGenerated;
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function activateResultTab(name) {
+  for (const button of document.querySelectorAll('[data-result-tab]')) {
+    button.setAttribute('aria-selected', String(button.dataset.resultTab === name));
+  }
+  for (const panel of document.querySelectorAll('[data-result-panel]')) {
+    panel.hidden = panel.dataset.resultPanel !== name;
+  }
 }
 
 function invalidatePasswordHashes(message) {
@@ -239,62 +325,47 @@ function invalidatePasswordHashes(message) {
   }
 }
 
-async function generateProjectPasswordHash(card) {
-  const password = projectField(card, 'password').value;
-  const status = card.querySelector('[data-role="password-status"]');
-  status.dataset.error = 'true';
-
-  if (!password || password.length > 256) {
-    status.textContent = '请输入 1–256 个字符的 Gateway 密码。';
-    return;
-  }
-
-  let secret = document.querySelector('#session-secret').value.trim();
-  if (!secret) {
-    secret = generateRandomSecret();
-    document.querySelector('#session-secret').value = secret;
-    setStatus('#session-secret-status', '已自动生成全局 Session Secret。', false);
-  }
-
-  if (secret.length < 32) {
-    status.textContent = 'ROUTE_SESSION_SECRET 至少需要 32 个字符。';
-    return;
-  }
-
+async function createPasswordHash(password, secret) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const digest = await passwordDigest(password, salt, secret);
-  projectField(card, 'password-hash').value = [
+  return [
     'hmac-sha256',
     toBase64Url(salt),
     toBase64Url(digest)
   ].join('$');
-  status.dataset.error = 'false';
-  status.textContent = '登录配置已生成，明文密码不会导出。';
-  markOutputsStale();
 }
 
-function generateAndRender({ scroll = false } = {}) {
+async function generateAndRender() {
   const status = document.querySelector('#generate-status');
+  const button = document.querySelector('#generate-button');
   status.dataset.error = 'true';
+  status.textContent = '正在验证并生成…';
+  button.disabled = true;
+  button.textContent = '正在生成…';
+  latestGenerated = null;
+  document.querySelector('#config-export-result-button').disabled = true;
+  document.querySelector('.wizard-nav [data-step-target="3"]').disabled = true;
   clearProductionOutputs();
 
   try {
-    const generated = generateProductionConfiguration();
+    const generated = await generateProductionConfiguration();
     latestGenerated = generated;
     renderGeneratedConfiguration(generated);
     status.dataset.error = 'false';
     status.textContent = `已生成 ${generated.projectCount} 个应用的完整配置。`;
-    if (scroll) {
-      document.querySelector('#deployment-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    activateResultTab('deployment');
+    showStep(3);
     return generated;
   } catch (error) {
     status.textContent = error.message;
     return null;
+  } finally {
+    button.disabled = false;
+    button.textContent = '生成全部配置';
   }
 }
 
-function generateProductionConfiguration() {
+async function generateProductionConfiguration() {
   const workerName = readValue('#worker-name');
   const baseDomain = parseBaseDomain(readValue('#base-domain'), true);
   const ttlSeconds = Number(readValue('#session-ttl'));
@@ -312,11 +383,30 @@ function generateProductionConfiguration() {
     throw new Error('应用数量必须是 1–200 个。');
   }
 
+  const requiredCards = cards.filter(card => projectField(card, 'edge-access').value === 'required');
+  let sessionSecret = readValue('#session-secret');
+
+  if (requiredCards.length && !sessionSecret) {
+    const hashWithoutPassword = requiredCards.find(card => (
+      projectField(card, 'password-hash').value.trim() && !projectField(card, 'password').value
+    ));
+    if (hashWithoutPassword) {
+      selectProject(hashWithoutPassword);
+      throw new Error('已存在 passwordHash，但缺少与它绑定的 Session Secret。请导入原 Secret，或重新输入该应用密码。');
+    }
+    sessionSecret = generateRandomSecret();
+    document.querySelector('#session-secret').value = sessionSecret;
+    setStatus('#session-secret-status', '已自动生成全局 Session Secret。', false);
+  }
+
+  if (requiredCards.length && sessionSecret.length < 32) {
+    throw new Error('启用 Edge 登录时，ROUTE_SESSION_SECRET 至少需要 32 个字符。');
+  }
+
   const projects = {};
   const originSecrets = {};
   const bindingOwners = new Map();
   const wafSecrets = [];
-  let requiresSessionSecret = false;
 
   for (const [index, card] of cards.entries()) {
     const displayIndex = index + 1;
@@ -348,10 +438,34 @@ function generateProductionConfiguration() {
 
     const edgeAccess = { mode: edgeAccessMode };
     if (edgeAccessMode === 'required') {
-      const passwordHash = projectField(card, 'password-hash').value.trim();
+      const passwordInput = projectField(card, 'password');
+      const status = card.querySelector('[data-role="password-status"]');
+      let passwordHash = projectField(card, 'password-hash').value.trim();
+
+      if (passwordInput.value) {
+        if (passwordInput.value.length > 256) {
+          selectProject(card);
+          status.dataset.error = 'true';
+          status.textContent = 'Gateway 密码不能超过 256 个字符。';
+          throw new Error(`应用“${alias}”的 Gateway 密码不能超过 256 个字符。`);
+        }
+        passwordHash = await createPasswordHash(passwordInput.value, sessionSecret);
+        projectField(card, 'password-hash').value = passwordHash;
+        passwordInput.value = '';
+        status.dataset.error = 'false';
+        status.textContent = 'passwordHash 已生成，明文密码已从页面清除。';
+      } else if (!passwordHash) {
+        selectProject(card);
+        status.dataset.error = 'true';
+        status.textContent = '请输入 Gateway 访问密码。';
+        throw new Error(`应用“${alias}”启用了 Edge 登录，请输入 Gateway 访问密码。`);
+      } else {
+        status.dataset.error = 'false';
+        status.textContent = '继续使用已有 passwordHash。';
+      }
+
       validatePasswordHash(passwordHash);
       edgeAccess.passwordHash = passwordHash;
-      requiresSessionSecret = true;
     } else if (edgeAccessMode !== 'disabled') {
       throw new Error(`应用“${alias}”的 Edge Access 模式无效。`);
     }
@@ -407,11 +521,7 @@ function generateProductionConfiguration() {
   const routeJson = JSON.stringify(projects);
   const secrets = { ROUTE_PROJECTS_JSON: routeJson };
 
-  if (requiresSessionSecret) {
-    const sessionSecret = readValue('#session-secret');
-    if (sessionSecret.length < 32) {
-      throw new Error('启用 Edge 登录时，ROUTE_SESSION_SECRET 至少需要 32 个字符。');
-    }
+  if (requiredCards.length) {
     secrets.ROUTE_SESSION_SECRET = sessionSecret;
   }
 
@@ -485,9 +595,7 @@ function renderGeneratedConfiguration(generated) {
   document.querySelector('#generated-vars').textContent = Object.keys(generated.vars).join(', ');
   document.querySelector('#generated-secret-names').textContent = Object.keys(generated.secrets).join(', ');
   renderWafSecrets(generated.wafSecrets);
-  document.querySelector('#waf-step').hidden = generated.wafSecrets.length === 0;
-  document.querySelector('#deployment-result').dataset.visible = 'true';
-  document.querySelector('#config-export-button').disabled = false;
+  document.querySelector('#waf-empty').hidden = generated.wafSecrets.length !== 0;
   document.querySelector('#config-export-result-button').disabled = false;
 }
 
@@ -520,9 +628,10 @@ function renderWafSecrets(wafSecrets) {
 
 function markOutputsStale() {
   latestGenerated = null;
-  document.querySelector('#deployment-result').dataset.visible = 'false';
-  document.querySelector('#config-export-button').disabled = true;
   document.querySelector('#config-export-result-button').disabled = true;
+  const resultStepButton = document.querySelector('.wizard-nav [data-step-target="3"]');
+  if (resultStepButton) resultStepButton.disabled = true;
+  if (activeStep === 3) showStep(2);
 }
 
 function clearProductionOutputs() {
@@ -537,7 +646,6 @@ function clearProductionOutputs() {
     document.querySelector(selector).value = '';
   }
   document.querySelector('#waf-secrets-output').replaceChildren();
-  document.querySelector('#deployment-result').dataset.visible = 'false';
 }
 
 function resetGenerator() {
@@ -550,15 +658,19 @@ function resetGenerator() {
   addProject();
   clearProductionOutputs();
   latestGenerated = null;
-  document.querySelector('#config-export-button').disabled = true;
   document.querySelector('#config-export-result-button').disabled = true;
   setStatus('#generate-status', '', false);
   setStatus('#session-secret-status', '', false);
+  setStatus('#export-status', '', false);
+  showStep(1);
 }
 
 function exportVariablesFile() {
-  const generated = latestGenerated || generateAndRender();
-  if (!generated) return;
+  const generated = latestGenerated;
+  if (!generated) {
+    setStatus('#export-status', '配置已变更，请返回应用步骤重新生成。', true);
+    return;
+  }
 
   const blob = new Blob(
     [JSON.stringify(generated.variablesFile, null, 2)],
@@ -571,7 +683,7 @@ function exportVariablesFile() {
   anchor.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
   setStatus(
-    '#config-file-status',
+    '#export-status',
     `已导出 ${generated.variablesFileName}。文件包含 Secret，请存入受控 WebDAV 目录或密码保险库。`,
     false
   );
@@ -600,14 +712,20 @@ async function importVariablesFile(file) {
   for (const project of imported.projects) addProject(project);
 
   syncAllHostnames();
-  const generated = generateAndRender();
-  if (!generated) throw new Error('变量文件导入后无法生成有效配置。');
+  selectProject(document.querySelector('[data-project]'));
+  markOutputsStale();
 
   setStatus(
     '#config-file-status',
     `已导入 ${imported.projects.length} 个应用。Secret 仅保留在当前页面内存中。`,
     false
   );
+  setStatus(
+    '#generate-status',
+    `已导入 ${imported.projects.length} 个应用，请检查后生成全部配置。`,
+    false
+  );
+  showStep(2);
 }
 
 function validateVariablesFile(value) {
