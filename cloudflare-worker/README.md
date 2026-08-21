@@ -28,7 +28,8 @@ Edge App Gateway 是面向 Vercel 应用的 Cloudflare Worker 全栈入口。浏
 | `src/`、`lib/` | Worker 模块源码和配置、代理逻辑 |
 | `tests/` | 配置、认证、全栈代理、流式与安全测试 |
 | `dashboard/worker.js` | 从模块源码生成的 Dashboard 单文件包 |
-| `tools/config-generator.html` | 两个地址即可生成完整配置；自动推导 Alias/Base Domain，并按普通变量、Cloudflare Secrets 和 Vercel WAF Secret 给出 Wrangler 部署步骤 |
+| `tools/config-generator.html`、`tools/config-generator.js` | 离线维护多个应用，导入/导出完整变量文件，并生成逐项目 Vercel WAF Secret |
+| `scripts/deploy-variable-file.js` | 校验变量文件，并通过 Wrangler 原子配置代码、变量、Secrets 和全部 Custom Domains |
 | `CLOUDFLARE_DEPLOYMENT.md` | Cloudflare、Vercel WAF 和上线验收步骤 |
 | `docs/` | 配置协议、架构和故障排查 |
 
@@ -47,6 +48,14 @@ npm run dashboard:build
 npm test
 npm run test:coverage
 npm run deploy:check
+```
+
+使用生成器导出的敏感变量文件进行 CLI 校验或部署：
+
+```bash
+npm run deploy:config -- /受控路径/vercel-route.production.variables.json --check
+npm run deploy:config -- /受控路径/vercel-route.production.variables.json --dry-run
+npm run deploy:config -- /受控路径/vercel-route.production.variables.json
 ```
 
 `dashboard/worker.js` 是生成文件，业务逻辑只维护在 `src/` 和 `lib/`。`.dev.vars`、真实域名、完整生产路由表、密码、散列、会话密钥和源站密钥不得提交。

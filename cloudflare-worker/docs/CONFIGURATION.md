@@ -13,7 +13,33 @@
 
 一个上游一个 Secret，不复用：例如 `ORIGIN_SECRET_PROJECT_A`、`ORIGIN_SECRET_PROJECT_B`。Secret 值不能进入 JSON、日志、响应、Git 或截图。
 
-本地 `tools/config-generator.html` 默认只要求完整访问域名和 Vercel Production URL，并自动推导 alias、`ROUTE_BASE_DOMAIN`、Custom Domain、Binding 和安全默认策略。结果页面明确区分普通变量、Cloudflare Secrets 与需要粘贴到 Vercel WAF 的项目 Secret，不需要在 Dashboard 手工逐项配置。生成器完全离线，且不会使用 localStorage、sessionStorage 或 IndexedDB；关闭页面即丢失未复制的 Secret。生产部署优先使用它输出的 `--secrets-file /dev/stdin` 流程，让新代码和新协议 Secret 在同一次 Wrangler 部署中生效。添加第二个项目时必须在高级设置中合并现有 `ROUTE_PROJECTS_JSON`，避免覆盖已有路由。
+本地 `tools/config-generator.html` 可同时维护 1–200 个应用。全局填写 Worker 名称与 `ROUTE_BASE_DOMAIN`，每个应用默认只填写 Alias 和 Vercel Production URL；工具自动生成 `alias.ROUTE_BASE_DOMAIN`、Binding、安全默认策略、完整路由表和逐项目 WAF Secret。生成器完全离线，不使用 localStorage、sessionStorage 或 IndexedDB。
+
+工具导出的 `*.production.variables.json` 同时是敏感备份和 `npm run deploy:config` 的输入，包含普通变量、完整路由表、Session Secret、所有 Origin Secret 和 Custom Domains。它可以保存在受控 WebDAV 目录，但 WebDAV 必须使用 HTTPS、独立凭据和严格访问控制；若服务端不是端到端加密，文件应额外加密。推荐通过系统挂载或同步客户端提供本地路径，生成器不直接保存 WebDAV 凭据或连接远端。
+
+变量文件协议为版本化 JSON：
+
+```json
+{
+  "format": "edge-app-gateway.variables",
+  "version": 1,
+  "worker": {
+    "name": "vercel-route",
+    "customDomains": ["portal.apps.example.com"]
+  },
+  "vars": {
+    "ROUTE_BASE_DOMAIN": "apps.example.com",
+    "ROUTE_SESSION_TTL_SECONDS": "28800"
+  },
+  "secrets": {
+    "ROUTE_PROJECTS_JSON": "<完整 JSON 字符串>",
+    "ROUTE_SESSION_SECRET": "<仅 Edge Access required 时存在>",
+    "ORIGIN_SECRET_PORTAL": "<项目独立 Secret>"
+  }
+}
+```
+
+明文 Gateway 密码不会进入变量文件，只保存使用 Session Secret 生成的 `passwordHash`。CLI 部署脚本会重新校验路由与文件字段，并通过 Wrangler 标准输入上传 Secrets。
 
 ## 路由协议
 

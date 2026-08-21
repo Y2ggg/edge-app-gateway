@@ -1,6 +1,6 @@
 # Cloudflare 与 Vercel 部署手册
 
-本手册将仓库内发布和外部控制台操作分开。任何真实路由表、密码、散列、域名、Session Secret 或 Origin Secret 都只进入受控配置，不进入 Git。
+本手册使用 Wrangler CLI 管理 Cloudflare Worker，不依赖 Cloudflare Dashboard。任何真实路由表、密码、散列、域名、Session Secret 或 Origin Secret 都只进入受控配置，不进入 Git。
 
 ## 1. 仓库发布前检查
 
@@ -34,7 +34,8 @@ npm run deploy:check
 
 3. 为每个 Vercel 项目分别生成至少 32 个随机字符的 Origin Secret，禁止复用。
 4. 按[配置协议](./docs/CONFIGURATION.md)准备完整 `ROUTE_PROJECTS_JSON`。配置只能写 Binding 名，不能写 Origin Secret 值。
-5. 可在本地打开 `tools/config-generator.html`，默认只填写用户访问域名和 Vercel Production URL。工具从完整域名自动推导 alias 与 `ROUTE_BASE_DOMAIN`，自动生成 Binding 和 Secret，并按顺序给出 Wrangler 原子部署、Vercel WAF 和验收步骤；无需在 Cloudflare Dashboard 逐项创建环境变量。工具不会发送网络请求或写入浏览器存储，包含 Secret 的输出只通过 Wrangler 标准输入使用，不保存到仓库或普通文件。新增第二个项目时，在折叠的高级设置中粘贴受控保存的现有 `ROUTE_PROJECTS_JSON`，生成器会保留旧项目并生成全部 Custom Domain 参数。
+5. 在本地打开 `tools/config-generator.html`，填写 Worker 名称、统一基础域名，并在应用列表中同时维护 1–200 个项目。每个项目默认只需 Alias 和 Vercel Production URL；工具自动生成 Custom Domain、Binding、Origin Secret、完整路由表及 Vercel WAF 清单。
+6. 导出 `*.production.variables.json`。这是包含全部生产 Secret 的敏感备份和 CLI 部署输入，不得提交 Git。可存入密码保险库、加密磁盘，或通过 WebDAV 客户端同步到使用 HTTPS 和独立账号保护的私有目录。生成器本身保持离线，不直接连接 WebDAV。
 
 示例仅使用占位符：
 
@@ -58,22 +59,28 @@ npm run deploy:check
 }
 ```
 
-## 3. 部署 Worker
+## 3. 使用 Wrangler CLI 部署 Worker
 
-Wrangler 流程：
+首次操作先核对 Wrangler 账号与现有 Binding：
 
 ```bash
-npx wrangler secret put ROUTE_PROJECTS_JSON
-npx wrangler secret put ROUTE_SESSION_SECRET
-npx wrangler secret put ORIGIN_SECRET_PORTAL
-npm run deploy
+npx wrangler whoami
+npx wrangler secret list --name vercel-route
 ```
 
-只有 disabled Edge Access 路由时可以省略 `ROUTE_SESSION_SECRET`。每个 `originProtection.secretBinding` 都必须存在，否则 Worker 返回安全的 503 配置错误且不会请求上游。
+变量文件可以位于本地磁盘或已挂载/同步的 WebDAV 目录。先校验，再 dry-run，最后部署：
 
-Dashboard 粘贴流程使用 `dashboard/worker.js`，不要粘贴带 import 的 `src/worker.js`。随后在 Settings 中添加同名变量、Secret 以及 `EDGE_LOGIN_RATE_LIMITER` Binding。Wrangler 配置使用 namespace `1001`、每分钟 5 次提交；同一账号若已占用该 namespace，可改为另一个账号内唯一的正整数，并保持 Binding 名不变。
+```bash
+npm run deploy:config -- /受控路径/vercel-route.production.variables.json --check
+npm run deploy:config -- /受控路径/vercel-route.production.variables.json --dry-run
+npm run deploy:config -- /受控路径/vercel-route.production.variables.json
+```
 
-为每个 alias 添加精确 Cloudflare Custom Domain，例如 `portal.apps.example.com`。不要使用通配 Custom Domain。多应用时设置 `ROUTE_BASE_DOMAIN=apps.example.com`；单应用可以不设置。
+部署脚本校验文件版本、路由协议、Secret Binding、Alias、基础域名及全部 Custom Domains，然后调用本地 Wrangler。Secret JSON 只写入 Wrangler 标准输入，不出现在命令行参数或脚本日志中。普通变量使用 `--var`，每个精确域名使用一个 `--domain`；Rate Limiter、`workers_dev=false` 和 `preview_urls=false` 继续由 `wrangler.jsonc` 管理。
+
+只有 disabled Edge Access 路由时可以省略 `ROUTE_SESSION_SECRET`。每个 `originProtection.secretBinding` 都必须在文件的 `secrets` 中存在，否则脚本拒绝部署。
+
+Wrangler 的 `--secrets-file` 是增量写入：从变量文件移除项目后，旧的未引用 Secret 不会自动删除。确认已无路由使用后，再显式执行 `npx wrangler secret delete <NAME> --name <WORKER>`；不要在自动部署中盲目清理远端 Secret。
 
 部署后访问：
 

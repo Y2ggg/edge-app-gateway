@@ -7,6 +7,7 @@
     "dev": "wrangler dev",
     "dashboard:build": "esbuild src/worker.js --bundle --format=esm --platform=browser --outfile=dashboard/worker.js",
     "deploy": "wrangler deploy",
+    "deploy:config": "node scripts/deploy-variable-file.js",
     "deploy:check": "wrangler deploy --dry-run",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",

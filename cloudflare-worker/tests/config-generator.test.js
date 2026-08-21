@@ -2,60 +2,58 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const generatorSource = await readFile(
+const generatorHtml = await readFile(
   new URL('../tools/config-generator.html', import.meta.url),
   'utf8'
 );
+const generatorScript = await readFile(
+  new URL('../tools/config-generator.js', import.meta.url),
+  'utf8'
+);
 
-test('keeps the configuration validator offline', () => {
-  assert.match(generatorSource, /id="verify-hostname"/);
-  assert.match(generatorSource, /id="verify-projects"/);
-  assert.match(generatorSource, /id="verify-secret"/);
-  assert.match(generatorSource, /async function verifyPassword/);
-  assert.match(generatorSource, /project\.edgeAccess\.passwordHash/);
-  assert.match(generatorSource, /originProtection\.mode/);
-  assert.match(generatorSource, /requestOriginPolicy/);
-  assert.match(generatorSource, /crypto\.subtle\.sign/);
-  assert.doesNotMatch(generatorSource, /crypto\.subtle\.deriveBits/);
-  assert.doesNotMatch(generatorSource, /\bfetch\s*\(/);
+test('keeps the configuration generator offline', () => {
+  assert.match(generatorHtml, /id="verify-hostname"/);
+  assert.match(generatorHtml, /id="verify-projects"/);
+  assert.match(generatorHtml, /id="verify-secret"/);
+  assert.match(generatorScript, /async function verifyPassword/);
+  assert.match(generatorScript, /crypto\.subtle\.sign/);
+  assert.doesNotMatch(generatorHtml + generatorScript, /localStorage|sessionStorage|indexedDB/);
+  assert.doesNotMatch(generatorScript, /\bfetch\s*\(/);
 });
 
-test('generates the complete production configuration without writing secrets', () => {
-  assert.match(generatorSource, /id="origin-secret-output"/);
-  assert.match(generatorSource, /id="route-json-output"/);
-  assert.match(generatorSource, /id="secret-bulk-output"/);
-  assert.match(generatorSource, /id="environment-output"/);
-  assert.match(generatorSource, /id="wrangler-command-output"/);
-  assert.match(generatorSource, /function generateProductionConfiguration/);
-  assert.match(generatorSource, /--secrets-file \/dev\/stdin/);
-  assert.match(generatorSource, /--domain/);
-  assert.match(generatorSource, /ORIGIN_SECRET_/);
-  assert.doesNotMatch(generatorSource, /localStorage|sessionStorage|indexedDB/);
+test('builds multiple applications with per-project secrets and domains', () => {
+  assert.match(generatorHtml, /id="project-template"/);
+  assert.match(generatorHtml, /id="add-project-button"/);
+  assert.match(generatorHtml, /生成多应用部署配置/);
+  assert.match(generatorScript, /function addProject/);
+  assert.match(generatorScript, /for \(const \[index, card\] of cards\.entries\(\)\)/);
+  assert.match(generatorScript, /ORIGIN_SECRET_/);
+  assert.match(generatorScript, /customDomains = Object\.keys\(projects\)/);
+  assert.match(generatorScript, /bindingOwners\.has/);
 });
 
-test('keeps the default onboarding form small and explains binding ownership', () => {
-  assert.match(generatorSource, /默认只填两个地址/);
-  assert.match(generatorSource, /id="route-hostname"/);
-  assert.match(generatorSource, /id="route-target"/);
-  assert.match(generatorSource, /function deriveGatewayDomain/);
-  assert.match(generatorSource, /高级设置（通常不用改）/);
-  assert.match(generatorSource, /不需要去 Cloudflare Dashboard 手工添加环境变量/);
-  assert.match(generatorSource, /普通变量：/);
-  assert.match(generatorSource, /Cloudflare Secrets：/);
-  assert.match(generatorSource, /Vercel WAF 使用：/);
+test('imports and exports a versioned variables file without plaintext passwords', () => {
+  assert.match(generatorHtml, /id="config-import-input"/);
+  assert.match(generatorHtml, /id="config-export-button"/);
+  assert.match(generatorScript, /edge-app-gateway\.variables/);
+  assert.match(generatorScript, /CONFIG_FILE_VERSION = 1/);
+  assert.match(generatorScript, /async function importVariablesFile/);
+  assert.match(generatorScript, /function exportVariablesFile/);
+  assert.match(generatorScript, /new Blob/);
+  assert.match(generatorScript, /ROUTE_PROJECTS_JSON/);
+  assert.doesNotMatch(generatorScript, /secrets\.password|password:\s*projectField/);
 });
 
-test('supports merging existing projects and keeps secrets out of the variable summary', () => {
-  assert.match(generatorSource, /id="route-existing-projects"/);
-  assert.match(generatorSource, /projects\[alias\] = route/);
-  assert.match(generatorSource, /for \(const projectAlias of Object\.keys\(projects\)\)/);
-  assert.match(generatorSource, /# Secrets（Wrangler --secrets-file 自动配置）/);
-  assert.doesNotMatch(generatorSource, /`ROUTE_PROJECTS_JSON=\$\{routeJson\}`/);
+test('explains CLI and WebDAV-safe ownership of variables', () => {
+  assert.match(generatorHtml, /npm run deploy:config/);
+  assert.match(generatorHtml, /受控 WebDAV 目录/);
+  assert.match(generatorHtml, /不需要 Cloudflare Dashboard/);
+  assert.match(generatorHtml, /普通变量：/);
+  assert.match(generatorHtml, /Cloudflare Secrets：/);
+  assert.match(generatorScript, /--secrets-file \/dev\/stdin/);
+  assert.match(generatorScript, /# Secrets（Wrangler --secrets-file/);
 });
 
-test('keeps the inline generator script syntactically valid', () => {
-  const script = generatorSource.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-
-  assert.ok(script);
-  assert.doesNotThrow(() => new Function(script));
+test('keeps the generator script syntactically valid', () => {
+  assert.doesNotThrow(() => new Function(generatorScript));
 });

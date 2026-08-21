@@ -9,5 +9,6 @@ coverage/
 !.dev.vars.example
 .wrangler/
 ROUTE_PROJECTS_JSON.json
+*.variables.json
 .DS_Store
 npm-debug.log*
