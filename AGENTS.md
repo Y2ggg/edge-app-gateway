@@ -12,9 +12,19 @@
 - `npm test`：运行 Node.js 测试。
 - `npm run test:coverage`：输出覆盖率。
 - `npm run dev`：启动 Wrangler 本地环境。
+- `npm run repository:check`：拒绝托管 CI/CD 和自动依赖更新配置。
 - `npm run password:hash -- "密码" "ROUTE_SESSION_SECRET"`：生成与会话密钥绑定的 HMAC 密码散列。
 - `npm run dashboard:build`：从模块源码生成 Dashboard 单文件包。
 - `npm run deploy:check`：执行 Wrangler dry-run。
+
+## 远程仓库与自动化边界
+
+- GitHub 默认只用于远程版本管理、代码协作、分支、tag 和 release。
+- 不得创建、恢复或提交 `.github/workflows/`、Dependabot、Renovate 或其他托管 CI/CD 自动化配置。
+- 构建、测试、打包和发布验证均在本地按需手动执行。
+- push、pull request、tag、release 或修改构建脚本，不代表授权启用远端自动化。
+- 确需远端自动构建、测试、依赖升级或发布时，必须先取得用户明确授权。
+- 保留用户已有修改；不得提交构建产物、运行数据、密钥、数据库或依赖目录。
 
 ## 编码风格与命名
 

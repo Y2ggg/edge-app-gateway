@@ -44,11 +44,14 @@ npm run dev
 提交前执行：
 
 ```bash
+npm run repository:check
 npm run dashboard:build
 npm test
 npm run test:coverage
 npm run deploy:check
 ```
+
+这些命令均由维护者在本地按需手动执行。仓库不使用托管 CI/CD 或自动依赖更新，push、pull request 和 tag 不会自动运行验证。Release 资产也应在本地生成并验证后手动上传。
 
 使用生成器导出的敏感变量文件时，请先进入 `edge-app-gateway` 仓库根目录。变量文件默认也下载到这里：
 

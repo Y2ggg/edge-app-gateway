@@ -8,9 +8,10 @@
     "dashboard:build": "esbuild src/worker.js --bundle --format=esm --platform=browser --outfile=dashboard/worker.js",
     "deploy": "wrangler deploy",
     "deploy:config": "node scripts/deploy-variable-file.js",
-    "deploy:check": "wrangler deploy --dry-run",
-    "test": "node --test",
-    "test:coverage": "node --test --experimental-test-coverage",
+    "deploy:check": "npm run repository:check && wrangler deploy --dry-run",
+    "repository:check": "node scripts/check-repository-policy.js",
+    "test": "npm run repository:check && node --test",
+    "test:coverage": "npm run repository:check && node --test --experimental-test-coverage",
     "password:hash": "node scripts/hash-worker-password.js",
     "session:secret": "node scripts/generate-session-secret.js"
   },

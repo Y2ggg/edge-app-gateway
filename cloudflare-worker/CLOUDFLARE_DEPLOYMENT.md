@@ -1,16 +1,19 @@
 # Cloudflare 与 Vercel 部署手册
 
-本手册使用 Wrangler CLI 管理 Cloudflare Worker，不依赖 Cloudflare Dashboard。任何真实路由表、密码、散列、域名、Session Secret 或 Origin Secret 都只进入受控配置，不进入 Git。
+本手册使用 Wrangler CLI 在本地手动管理 Cloudflare Worker，不依赖 Cloudflare Dashboard 或托管 CI/CD。任何真实路由表、密码、散列、域名、Session Secret 或 Origin Secret 都只进入受控配置，不进入 Git。
 
 ## 1. 仓库发布前检查
 
 ```bash
 npm install
+npm run repository:check
 npm run dashboard:build
 npm test
 npm run test:coverage
 npm run deploy:check
 ```
+
+以上检查不会因 push、pull request 或 tag 自动运行，必须在本地按需手动执行。
 
 生产 `wrangler.jsonc` 必须保持：
 
@@ -86,7 +89,7 @@ npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.v
 
 只有 disabled Edge Access 路由时可以省略 `ROUTE_SESSION_SECRET`。每个 `originProtection.secretBinding` 都必须在文件的 `secrets` 中存在，否则脚本拒绝部署。
 
-Wrangler 的 `--secrets-file` 是增量写入：从变量文件移除项目后，旧的未引用 Secret 不会自动删除。确认已无路由使用后，再显式执行 `npx wrangler secret delete <NAME> --name <WORKER>`；不要在自动部署中盲目清理远端 Secret。
+Wrangler 的 `--secrets-file` 是增量写入：从变量文件移除项目后，旧的未引用 Secret 不会自动删除。确认已无路由使用后，再显式执行 `npx wrangler secret delete <NAME> --name <WORKER>`；部署时不要盲目批量清理远端 Secret。
 
 部署后访问：
 
@@ -153,4 +156,4 @@ curl -i https://portal.apps.example.com/
 
 ## 7. 发布和回滚
 
-代码更新时重新生成 Dashboard 包并完成四条验证命令。Wrangler 部署可按 Cloudflare Deployment 回滚代码；变量、Secret、Rate Limiter、Custom Domain 和 Vercel WAF 是外部状态，需要单独保存变更记录和回滚步骤。
+代码更新时在本地重新生成 Dashboard 包并完成仓库策略、测试、覆盖率和部署 dry-run 验证。push、pull request、tag 和 GitHub Release 不会触发远端构建、测试或发布；如需 Release 资产，应在本地生成并验证后手动上传。Wrangler 部署可按 Cloudflare Deployment 回滚代码；变量、Secret、Rate Limiter、Custom Domain 和 Vercel WAF 是外部状态，需要单独保存变更记录和回滚步骤。

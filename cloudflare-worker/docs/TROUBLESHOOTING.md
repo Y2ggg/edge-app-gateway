@@ -72,10 +72,11 @@ NDJSON/SSE 延迟时检查：
 ## 本地维护
 
 ```bash
+npm run repository:check
 npm run dashboard:build
 npm test
 npm run test:coverage
 npm run deploy:check
 ```
 
-不要直接修改 `dashboard/worker.js`；修复模块源码、测试后重新生成。
+以上维护和验证命令均在本地手动执行，不会由 push、pull request 或 tag 触发。不要直接修改 `dashboard/worker.js`；修复模块源码、测试后重新生成。

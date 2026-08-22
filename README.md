@@ -10,3 +10,19 @@
 - 无 npm 部署说明：[`cloudflare-worker/CLOUDFLARE_DEPLOYMENT.md`](./cloudflare-worker/CLOUDFLARE_DEPLOYMENT.md)
 
 开发、测试和部署命令均在 `cloudflare-worker/` 目录内运行。真实环境变量、域名、应用映射、密码散列和会话密钥不得提交到仓库。
+
+## 仓库协作与发布策略
+
+GitHub 只用于代码存储、版本管理、代码协作、分支、tag 和 release。本仓库不使用 GitHub Actions、Dependabot 自动更新或其他托管 CI/CD；push、pull request 或 tag 不会自动执行构建、测试、打包、依赖升级或发布。
+
+所有验证均在本地按需手动执行。进入 `cloudflare-worker/` 后，至少先运行仓库策略检查，再按改动范围执行构建、测试和部署 dry-run：
+
+```bash
+npm run repository:check
+npm run dashboard:build
+npm test
+npm run test:coverage
+npm run deploy:check
+```
+
+Release 资产必须在本地生成并验证，再手动创建或更新 GitHub Release 并上传；push、pull request、tag 或 release 本身均不代表已完成验证，也不会触发远端自动化。
