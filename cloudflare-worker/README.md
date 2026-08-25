@@ -1,6 +1,6 @@
 # Edge App Gateway for Cloudflare Workers
 
-Edge App Gateway 是面向 Vercel 应用的 Cloudflare Worker 全栈入口。浏览器始终停留在自定义域名；Worker 可选执行边缘登录、代理完整 HTTP 请求、为每个上游注入独立源站密钥，并以流式正文返回响应。上游应用自己的 Access Gate、登录和 Cookie 不属于 Gateway 配置，也不会被 Gateway 删除或替代。
+本目录是 Edge App Gateway 的 Cloudflare Worker 部署组件。它为 Vercel 应用提供零侵入全栈入口：浏览器始终停留在自定义域名；Worker 可选执行边缘登录、代理完整 HTTP 请求、为每个上游注入独立源站密钥，并以流式正文返回响应。上游应用自己的 Access Gate、登录和 Cookie 不属于 Gateway 配置，也不会被 Gateway 删除或替代。
 
 四项职责彼此独立：
 
@@ -30,8 +30,9 @@ Edge App Gateway 是面向 Vercel 应用的 Cloudflare Worker 全栈入口。浏
 | `dashboard/worker.js` | 从模块源码生成的 Dashboard 单文件包 |
 | `tools/config-generator.html`、`tools/config-generator.js` | 三步式离线工具：集中维护多个应用，一次生成并导出完整变量文件和逐项目 Vercel WAF Secret |
 | `scripts/deploy-variable-file.js` | 校验变量文件，并通过 Wrangler 原子配置代码、变量、Secrets 和全部 Custom Domains |
-| `CLOUDFLARE_DEPLOYMENT.md` | Cloudflare、Vercel WAF 和上线验收步骤 |
-| `docs/` | 配置协议、架构和故障排查 |
+| `docs/QUICKSTART.md` | 已有 Gateway 新增应用及首次部署入口 |
+| `docs/DEPLOYMENT.md` | Cloudflare、Vercel WAF 和上线验收步骤 |
+| `docs/` | 快速开始、部署、配置协议、架构和故障排查 |
 
 ## 本地开发与验证
 
@@ -65,4 +66,4 @@ npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.v
 
 `dashboard/worker.js` 是生成文件，业务逻辑只维护在 `src/` 和 `lib/`。`.dev.vars`、真实域名、完整生产路由表、密码、散列、会话密钥和源站密钥不得提交。
 
-详细说明见[配置与安全](./docs/CONFIGURATION.md)、[架构](./docs/ARCHITECTURE.md)、[部署手册](./CLOUDFLARE_DEPLOYMENT.md)和[故障排查](./docs/TROUBLESHOOTING.md)。
+详细说明见[快速开始](./docs/QUICKSTART.md)、[配置与安全](./docs/CONFIGURATION.md)、[架构](./docs/ARCHITECTURE.md)、[部署手册](./docs/DEPLOYMENT.md)和[故障排查](./docs/TROUBLESHOOTING.md)。

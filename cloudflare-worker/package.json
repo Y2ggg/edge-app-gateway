@@ -1,8 +1,26 @@
 {
   "name": "edge-app-gateway",
   "version": "0.1.0",
+  "description": "Zero-intrusion Cloudflare Workers application gateway and reverse proxy for Vercel apps",
   "private": true,
+  "license": "MIT",
   "type": "module",
+  "keywords": [
+    "access-control",
+    "application-gateway",
+    "cloudflare-workers",
+    "edge-gateway",
+    "reverse-proxy",
+    "vercel"
+  ],
+  "homepage": "https://github.com/Y2ggg/edge-app-gateway#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Y2ggg/edge-app-gateway.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Y2ggg/edge-app-gateway/issues"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "dashboard:build": "esbuild src/worker.js --bundle --format=esm --platform=browser --outfile=dashboard/worker.js",
