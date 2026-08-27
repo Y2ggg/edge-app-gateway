@@ -2,6 +2,9 @@ const ROUTE_ALIAS_PATTERN = /^[a-z0-9][a-z0-9-]{2,62}$/;
 const SECRET_BINDING_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
 const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 const MAX_ROUTE_COUNT = 200;
+const DEFAULT_ENTRY_SESSION_TTL_SECONDS = 1800;
+const MIN_ENTRY_SESSION_TTL_SECONDS = 300;
+const MAX_ENTRY_SESSION_TTL_SECONDS = 86400;
 const SUPPORTED_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const SUPPORTED_METHOD_SET = new Set(SUPPORTED_METHODS);
 const FORBIDDEN_ORIGIN_HEADERS = new Set([
@@ -67,6 +70,8 @@ export function parseRouteProjects(rawConfig) {
     projects.set(alias, parseProject(alias, rawProject));
   }
 
+  validateEntryAccessRelationships(projects);
+
   return projects;
 }
 
@@ -91,6 +96,7 @@ function parseProject(alias, project) {
       ['preserve', 'rewrite-to-upstream']
     );
   const edgeAccess = parseEdgeAccess(alias, project.edgeAccess);
+  const entryAccess = parseEntryAccess(alias, project.entryAccess);
   const originProtection = parseOriginProtection(alias, project.originProtection);
   const allowedMethods = parseAllowedMethods(alias, project.allowedMethods, proxyProfile);
   const cachePolicy = project.cachePolicy === undefined
@@ -124,11 +130,83 @@ function parseProject(alias, project) {
     proxyProfile,
     requestOriginPolicy,
     edgeAccess,
+    entryAccess,
     originProtection,
     allowedMethods,
     cachePolicy,
     cookieDomainPolicy
   });
+}
+
+function parseEntryAccess(alias, entryAccess) {
+  if (entryAccess === undefined) {
+    return Object.freeze({ mode: 'disabled' });
+  }
+
+  if (entryAccess === null || Array.isArray(entryAccess) || typeof entryAccess !== 'object') {
+    throw new RouteConfigurationError(`Application ${alias} entryAccess must be an object`);
+  }
+
+  const mode = requireEnum(alias, 'entryAccess.mode', entryAccess.mode, ['disabled', 'required']);
+
+  if (mode === 'disabled') {
+    return Object.freeze({ mode });
+  }
+
+  const entryAlias = entryAccess.entryAlias;
+  const ttlSeconds = entryAccess.ttlSeconds === undefined
+    ? DEFAULT_ENTRY_SESSION_TTL_SECONDS
+    : entryAccess.ttlSeconds;
+
+  if (!isValidRouteAlias(entryAlias)) {
+    throw new RouteConfigurationError(
+      `Application ${alias} entryAccess.entryAlias must be a valid route alias`
+    );
+  }
+
+  if (
+    !Number.isInteger(ttlSeconds) ||
+    ttlSeconds < MIN_ENTRY_SESSION_TTL_SECONDS ||
+    ttlSeconds > MAX_ENTRY_SESSION_TTL_SECONDS
+  ) {
+    throw new RouteConfigurationError(
+      `Application ${alias} entryAccess.ttlSeconds must be between ${MIN_ENTRY_SESSION_TTL_SECONDS} and ${MAX_ENTRY_SESSION_TTL_SECONDS}`
+    );
+  }
+
+  return Object.freeze({ mode, entryAlias, ttlSeconds });
+}
+
+function validateEntryAccessRelationships(projects) {
+  for (const [alias, project] of projects) {
+    if (project.entryAccess.mode !== 'required') continue;
+
+    const entryProject = projects.get(project.entryAccess.entryAlias);
+
+    if (!entryProject || project.entryAccess.entryAlias === alias) {
+      throw new RouteConfigurationError(
+        `Application ${alias} entryAccess.entryAlias must reference another configured application`
+      );
+    }
+
+    if (project.deliveryMode !== 'proxy' || entryProject.deliveryMode !== 'proxy') {
+      throw new RouteConfigurationError(
+        `Application ${alias} and its entry application must use proxy delivery`
+      );
+    }
+
+    if (entryProject.edgeAccess.mode !== 'required') {
+      throw new RouteConfigurationError(
+        `Entry application ${project.entryAccess.entryAlias} must require Edge Access`
+      );
+    }
+
+    if (entryProject.entryAccess.mode !== 'disabled') {
+      throw new RouteConfigurationError(
+        `Entry application ${project.entryAccess.entryAlias} cannot require another entry application`
+      );
+    }
+  }
 }
 
 function parseTarget(alias, target) {

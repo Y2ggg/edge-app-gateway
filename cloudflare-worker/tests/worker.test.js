@@ -59,16 +59,37 @@ function documentHeaders(overrides = {}) {
   };
 }
 
+async function assertConcealedResponse(response, options = {}) {
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow, noarchive');
+  assert.match(response.headers.get('content-security-policy'), /default-src 'none'/);
+
+  const body = await response.text();
+  if (options.document) {
+    assert.match(response.headers.get('content-type'), /^text\/html/);
+    assert.match(response.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
+    assert.match(body, /页面无法打开/);
+    assert.match(body, /404 · PAGE NOT FOUND/);
+    assert.doesNotMatch(body, /<script|<form|<a\s|href=/i);
+  } else {
+    assert.equal(body, '');
+  }
+  assert.doesNotMatch(body, /Gateway|统一入口|EDGE_ENTRY|权限|密码/i);
+}
+
 test('exposes the namespaced health endpoint without configuration details', async () => {
   const response = await handleWorkerRequest(
     new Request('https://data.example.com/_edge-gateway/health'),
-    {}
+    createEnvironment()
   );
 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     ok: true,
-    build: '2026-08-21-gateway-v5',
+    build: '2026-08-27-gateway-v9',
     edge: 'local'
   });
   assert.equal(response.headers.get('cache-control'), 'private, no-store');
@@ -265,6 +286,313 @@ test('Edge Access required proxies after login without forwarding the Gateway se
   assert.equal(response.status, 200);
   assert.equal(await response.text(), 'protected content');
   assert.equal(forwardedCookie, 'app_session=application-private');
+});
+
+test('requires a signed handoff from the configured unified entry application', async () => {
+  const entryAlias = 'portal-a7f3';
+  const targetAlias = 'docs-a7f3';
+  const entryProject = requiredProject({ target: 'https://portal-project.vercel.app' });
+  const targetProject = requiredProject({
+    entryAccess: {
+      mode: 'required',
+      entryAlias,
+      ttlSeconds: 900
+    }
+  });
+  const environment = {
+    ...createEnvironment(),
+    ROUTE_BASE_DOMAIN: 'preview.example.com',
+    ROUTE_PROJECTS_JSON: JSON.stringify({
+      [entryAlias]: entryProject,
+      [targetAlias]: targetProject
+    })
+  };
+  const now = Date.UTC(2026, 7, 26);
+  let upstreamCookie = '';
+  const fetchImpl = async (url, options) => {
+    upstreamCookie = options.headers.get('cookie') || '';
+    return new Response(`proxied:${url.pathname}`);
+  };
+
+  for (const headers of [
+    {},
+    { Referer: `https://${entryAlias}.preview.example.com/` },
+    { Cookie: 'entry_session=forged' }
+  ]) {
+    const denied = await handleWorkerRequest(
+      new Request(`https://${targetAlias}.preview.example.com/`, { headers }),
+      environment,
+      { fetchImpl, now }
+    );
+    await assertConcealedResponse(denied);
+  }
+
+  const concealedDocument = await handleWorkerRequest(
+    new Request(`https://${targetAlias}.preview.example.com/`, {
+      headers: documentHeaders()
+    }),
+    environment,
+    { fetchImpl, now }
+  );
+  await assertConcealedResponse(concealedDocument, { document: true });
+
+  for (const path of [
+    '/_edge-gateway/login',
+    '/_edge-gateway/session',
+    '/_edge-gateway/health',
+    '/_edge-gateway/unknown'
+  ]) {
+    const hiddenGatewayEndpoint = await handleWorkerRequest(
+      new Request(`https://${targetAlias}.preview.example.com${path}`),
+      environment,
+      { now }
+    );
+    await assertConcealedResponse(hiddenGatewayEndpoint);
+  }
+
+  const concealedMethod = await handleWorkerRequest(
+    new Request(`https://${targetAlias}.preview.example.com/`, { method: 'BREW' }),
+    environment,
+    { now }
+  );
+  await assertConcealedResponse(concealedMethod);
+
+  const entryOrigin = `https://${entryAlias}.preview.example.com`;
+  const launchPath = `/_edge-gateway/launch?target=${targetAlias}.preview.example.com&next=%2Fguide`;
+  const navigationHeaders = {
+    ...documentHeaders(),
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-User': '?1'
+  };
+  const unauthenticatedLaunch = await handleWorkerRequest(
+    new Request(`${entryOrigin}${launchPath}`, { headers: navigationHeaders }),
+    environment,
+    { now }
+  );
+  await assertConcealedResponse(unauthenticatedLaunch, { document: true });
+
+  const entrySession = await createWorkerSessionToken(entryAlias, SESSION_SECRET, {
+    now,
+    ttlSeconds: 600
+  });
+
+  const addressBarLaunch = await handleWorkerRequest(
+    new Request(`${entryOrigin}${launchPath}`, {
+      headers: {
+        ...documentHeaders(),
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        Cookie: `route_session=${entrySession}`
+      }
+    }),
+    environment,
+    { now }
+  );
+  await assertConcealedResponse(addressBarLaunch, { document: true });
+
+  const developerToolsFetch = await handleWorkerRequest(
+    new Request(`${entryOrigin}${launchPath}`, {
+      headers: {
+        Cookie: `route_session=${entrySession}`,
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        Referer: `${entryOrigin}/`
+      }
+    }),
+    environment,
+    { now }
+  );
+  await assertConcealedResponse(developerToolsFetch);
+
+  const syntheticNavigation = await handleWorkerRequest(
+    new Request(`${entryOrigin}${launchPath}`, {
+      headers: {
+        ...documentHeaders(),
+        Cookie: `route_session=${entrySession}`,
+        'Sec-Fetch-Site': 'same-origin',
+        Referer: `${entryOrigin}/`
+      }
+    }),
+    environment,
+    { now }
+  );
+  await assertConcealedResponse(syntheticNavigation, { document: true });
+
+  const crossSiteLaunch = await handleWorkerRequest(
+    new Request(`${entryOrigin}${launchPath}`, {
+      headers: {
+        ...documentHeaders(),
+        Cookie: `route_session=${entrySession}`,
+        'Sec-Fetch-Site': 'cross-site',
+        'Sec-Fetch-User': '?1',
+        Referer: `${entryOrigin}/`
+      }
+    }),
+    environment,
+    { now }
+  );
+  await assertConcealedResponse(crossSiteLaunch, { document: true });
+
+  const invalidLaunchMethod = await handleWorkerRequest(
+    new Request(`${entryOrigin}${launchPath}`, {
+      method: 'POST',
+      headers: { Cookie: `route_session=${entrySession}` }
+    }),
+    environment,
+    { now }
+  );
+  await assertConcealedResponse(invalidLaunchMethod);
+
+  const createLaunchRequest = (overrides = {}) => {
+    const target = overrides.target || `${targetAlias}.preview.example.com`;
+    const next = overrides.next || '/guide';
+    return new Request(
+      `${entryOrigin}/_edge-gateway/launch?${new URLSearchParams({ target, next })}`,
+      {
+        headers: {
+          ...navigationHeaders,
+          Cookie: `route_session=${entrySession}`
+        }
+      }
+    );
+  };
+  const launch = await handleWorkerRequest(
+    createLaunchRequest(),
+    environment,
+    { now }
+  );
+
+  assert.equal(launch.status, 303);
+  assert.match(
+    launch.headers.get('location'),
+    new RegExp(`^https://${targetAlias}\\.preview\\.example\\.com/_edge-gateway/entry\\?`)
+  );
+  assert.equal(launch.headers.get('referrer-policy'), 'no-referrer');
+
+  const legacyBrowserLaunch = await handleWorkerRequest(
+    new Request(`${entryOrigin}${launchPath}`, {
+      headers: {
+        Cookie: `route_session=${entrySession}`,
+        Referer: `${entryOrigin}/`
+      }
+    }),
+    environment,
+    { now }
+  );
+  assert.equal(legacyBrowserLaunch.status, 303);
+
+  const tamperedTicketUrl = new URL(launch.headers.get('location'));
+  tamperedTicketUrl.searchParams.set('next', '/other');
+  const tamperedTicket = await handleWorkerRequest(
+    new Request(tamperedTicketUrl),
+    environment,
+    { now }
+  );
+  await assertConcealedResponse(tamperedTicket);
+
+  const expiredTicket = await handleWorkerRequest(
+    new Request(launch.headers.get('location')),
+    environment,
+    { now: now + 31000 }
+  );
+  await assertConcealedResponse(expiredTicket);
+
+  const invalidEntryMethod = await handleWorkerRequest(
+    new Request(launch.headers.get('location'), { method: 'POST' }),
+    environment,
+    { now }
+  );
+  await assertConcealedResponse(invalidEntryMethod);
+
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const missingBaseDomain = await handleWorkerRequest(
+      createLaunchRequest({ target: targetAlias }),
+      { ...environment, ROUTE_BASE_DOMAIN: '' },
+      { now }
+    );
+    assert.equal(missingBaseDomain.status, 503);
+  } finally {
+    console.error = originalError;
+  }
+
+  const redeemedTickets = new Set();
+  const entryTicketRedeemer = async ticket => {
+    if (redeemedTickets.has(ticket)) return false;
+    redeemedTickets.add(ticket);
+    return true;
+  };
+  const accepted = await handleWorkerRequest(
+    new Request(launch.headers.get('location')),
+    environment,
+    { now, entryTicketRedeemer }
+  );
+  assert.equal(accepted.status, 303);
+  assert.equal(accepted.headers.get('location'), '/guide');
+  assert.match(accepted.headers.get('set-cookie'), /^entry_session=/);
+  assert.match(accepted.headers.get('set-cookie'), /HttpOnly/);
+  assert.match(accepted.headers.get('set-cookie'), /SameSite=Lax/);
+  assert.match(accepted.headers.get('set-cookie'), /Max-Age=900/);
+  assert.doesNotMatch(accepted.headers.get('set-cookie'), /Domain=/i);
+
+  const replayed = await handleWorkerRequest(
+    new Request(launch.headers.get('location')),
+    environment,
+    { now, entryTicketRedeemer }
+  );
+  await assertConcealedResponse(replayed);
+
+  const entryGrant = readCookie(accepted.headers.get('set-cookie'), 'entry_session');
+  const targetPasswordRequired = await handleWorkerRequest(
+    new Request(`https://${targetAlias}.preview.example.com/guide`, {
+      headers: {
+        ...documentHeaders(),
+        Cookie: `entry_session=${entryGrant}`
+      }
+    }),
+    environment,
+    { fetchImpl, now }
+  );
+  assert.equal(targetPasswordRequired.status, 303);
+  assert.match(targetPasswordRequired.headers.get('location'), /^\/_edge-gateway\/login\?/);
+
+  const targetSession = await createWorkerSessionToken(targetAlias, SESSION_SECRET, {
+    now,
+    ttlSeconds: 600
+  });
+  const allowed = await handleWorkerRequest(
+    new Request(`https://${targetAlias}.preview.example.com/guide`, {
+      headers: {
+        Cookie: `entry_session=${entryGrant}; route_session=${targetSession}; app_session=application-private`
+      }
+    }),
+    environment,
+    { fetchImpl, now }
+  );
+  assert.equal(allowed.status, 200);
+  assert.equal(await allowed.text(), 'proxied:/guide');
+  assert.equal(upstreamCookie, 'app_session=application-private');
+
+  const authorizedLogin = await handleWorkerRequest(
+    new Request(`https://${targetAlias}.preview.example.com/_edge-gateway/login`, {
+      headers: { Cookie: `entry_session=${entryGrant}` }
+    }),
+    environment,
+    { now }
+  );
+  assert.equal(authorizedLogin.status, 200);
+  assert.match(await authorizedLogin.text(), /访问验证/);
+
+  const expired = await handleWorkerRequest(
+    new Request(`https://${targetAlias}.preview.example.com/guide`, {
+      headers: { Cookie: `entry_session=${entryGrant}` }
+    }),
+    environment,
+    { fetchImpl, now: now + 901000 }
+  );
+  await assertConcealedResponse(expired);
 });
 
 test('completes an upstream Access Gate login and logout flow with rewritten origins', async () => {

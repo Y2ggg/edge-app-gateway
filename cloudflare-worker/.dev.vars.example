@@ -1,5 +1,5 @@
 # 单应用且未设置 ROUTE_BASE_DOMAIN 时，Worker 自动使用唯一应用。
-ROUTE_PROJECTS_JSON={"example-a7f3":{"target":"https://your-project.vercel.app","deliveryMode":"proxy","proxyProfile":"fullstack","requestOriginPolicy":"rewrite-to-upstream","edgeAccess":{"mode":"disabled"},"originProtection":{"mode":"required","headerName":"x-edge-app-gateway-origin","secretBinding":"ORIGIN_SECRET_EXAMPLE"},"allowedMethods":["GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"],"cachePolicy":"assets-only","cookieDomainPolicy":"strip"}}
+ROUTE_PROJECTS_JSON={"example-a7f3":{"target":"https://your-project.vercel.app","deliveryMode":"proxy","proxyProfile":"fullstack","requestOriginPolicy":"rewrite-to-upstream","edgeAccess":{"mode":"disabled"},"entryAccess":{"mode":"disabled"},"originProtection":{"mode":"required","headerName":"x-edge-app-gateway-origin","secretBinding":"ORIGIN_SECRET_EXAMPLE"},"allowedMethods":["GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"],"cachePolicy":"assets-only","cookieDomainPolicy":"strip"}}
 
 # 仅 edgeAccess.mode=required 时需要；运行 `npm run session:secret` 生成。
 ROUTE_SESSION_SECRET=replace-with-at-least-32-random-characters

@@ -71,10 +71,14 @@ export function buildUpstreamHeaders(headers, options = {}) {
     upstreamHeaders.delete(options.originHeaderName);
   }
 
-  const cookie = removeCookie(
-    upstreamHeaders.get('cookie'),
-    options.sessionCookieName || 'route_session'
-  );
+  const sessionCookieNames = Array.isArray(options.sessionCookieNames)
+    ? options.sessionCookieNames
+    : [options.sessionCookieName || 'route_session'];
+  let cookie = upstreamHeaders.get('cookie');
+
+  for (const cookieName of sessionCookieNames) {
+    cookie = removeCookie(cookie, cookieName);
+  }
 
   if (cookie) {
     upstreamHeaders.set('cookie', cookie);
@@ -214,7 +218,12 @@ export function rewriteLocation(location, upstreamUrl, proxyOrigin) {
 export function sanitizeNextPath(rawPath) {
   const nextPath = typeof rawPath === 'string' ? rawPath : '/';
 
-  if (!nextPath.startsWith('/') || nextPath.startsWith('//') || /[\r\n]/.test(nextPath)) {
+  if (
+    !nextPath.startsWith('/') ||
+    nextPath.startsWith('//') ||
+    nextPath.includes('\\') ||
+    /[\r\n]/.test(nextPath)
+  ) {
     return '/';
   }
 

@@ -28,8 +28,31 @@ const forbiddenOriginHeaders = new Set([
 
 let projectSequence = 0;
 let latestGenerated = null;
+let verificationConfiguration = null;
 let selectedProjectId = null;
 let activeStep = 1;
+
+for (const button of document.querySelectorAll('[data-workspace-tab]')) {
+  button.addEventListener('click', () => showWorkspaceTab(button.dataset.workspaceTab));
+}
+
+document.querySelector('.workspace-tabs').addEventListener('keydown', event => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const tabs = [...document.querySelectorAll('[data-workspace-tab]')];
+  const currentIndex = tabs.indexOf(document.activeElement);
+  if (currentIndex < 0) return;
+
+  let targetIndex;
+  if (event.key === 'Home') targetIndex = 0;
+  else if (event.key === 'End') targetIndex = tabs.length - 1;
+  else if (event.key === 'ArrowLeft') targetIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+  else targetIndex = (currentIndex + 1) % tabs.length;
+
+  event.preventDefault();
+  const target = tabs[targetIndex];
+  target.focus();
+  showWorkspaceTab(target.dataset.workspaceTab);
+});
 
 document.querySelector('#add-project-button').addEventListener('click', () => {
   addProject();
@@ -96,6 +119,7 @@ document.querySelector('#projects-container').addEventListener('change', event =
   if (!card) return;
 
   if (event.target.matches('[data-field="edge-access"]')) syncProjectEdgeFields(card);
+  if (event.target.matches('[data-field="entry-access"]')) syncProjectEntryFields(card);
   if (event.target.matches('[data-field="delivery-mode"], [data-field="proxy-profile"], [data-field="origin-protection"]')) {
     syncProjectOptions(card, event.target.dataset.field);
   }
@@ -159,10 +183,14 @@ document.addEventListener('click', async event => {
   }, 1200);
 });
 
-document.querySelector('#verify-button').addEventListener('click', verifyExistingConfiguration);
+document.querySelector('#verification-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  await verifyExistingConfiguration();
+});
 
 addProject();
 showStep(1);
+showWorkspaceTab('generator');
 
 function addProject(initial = {}) {
   if (document.querySelectorAll('[data-project]').length >= 200) {
@@ -178,6 +206,9 @@ function addProject(initial = {}) {
   projectField(card, 'target').value = route.target || '';
   projectField(card, 'edge-access').value = route.edgeAccess?.mode || 'disabled';
   projectField(card, 'password-hash').value = route.edgeAccess?.passwordHash || '';
+  projectField(card, 'entry-access').value = route.entryAccess?.mode || 'disabled';
+  projectField(card, 'entry-alias').value = route.entryAccess?.entryAlias || '';
+  projectField(card, 'entry-ttl').value = String(route.entryAccess?.ttlSeconds || 1800);
   projectField(card, 'delivery-mode').value = route.deliveryMode || 'proxy';
   projectField(card, 'proxy-profile').value = route.proxyProfile || 'fullstack';
   projectField(card, 'origin-policy').value = route.requestOriginPolicy || 'rewrite-to-upstream';
@@ -199,6 +230,7 @@ function addProject(initial = {}) {
 
   document.querySelector('#projects-container').append(card);
   syncProjectEdgeFields(card);
+  syncProjectEntryFields(card);
   syncProjectOptions(card);
   syncProjectHostname(card);
   updateProjectTitles();
@@ -273,6 +305,11 @@ function syncProjectEdgeFields(card) {
   card.querySelector('[data-role="edge-fields"]').hidden = !required;
 }
 
+function syncProjectEntryFields(card) {
+  const required = projectField(card, 'entry-access').value === 'required';
+  card.querySelector('[data-role="entry-fields"]').hidden = !required;
+}
+
 function syncProjectOptions(card, changedField = '') {
   const deliveryMode = projectField(card, 'delivery-mode');
   const proxyProfile = projectField(card, 'proxy-profile');
@@ -313,6 +350,19 @@ function showStep(step) {
     if (target === 3) button.disabled = !latestGenerated;
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function showWorkspaceTab(name) {
+  if (!['generator', 'verification'].includes(name)) return;
+
+  for (const button of document.querySelectorAll('[data-workspace-tab]')) {
+    const selected = button.dataset.workspaceTab === name;
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
+  for (const panel of document.querySelectorAll('[data-workspace-panel]')) {
+    panel.hidden = panel.dataset.workspacePanel !== name;
+  }
 }
 
 function activateResultTab(name) {
@@ -361,6 +411,12 @@ async function generateAndRender() {
     const generated = await generateProductionConfiguration();
     latestGenerated = generated;
     renderGeneratedConfiguration(generated);
+    setVerificationConfiguration({
+      baseDomain: generated.vars.ROUTE_BASE_DOMAIN,
+      projects: parseProjects(generated.routeJson),
+      sessionSecret: generated.secrets.ROUTE_SESSION_SECRET || '',
+      source: '最近生成的完整配置'
+    });
     status.dataset.error = 'false';
     status.textContent = `已生成 ${generated.projectCount} 个应用的完整配置。`;
     activateResultTab('deployment');
@@ -433,6 +489,7 @@ async function generateProductionConfiguration() {
     const proxyProfile = projectField(card, 'proxy-profile').value;
     const requestOriginPolicy = projectField(card, 'origin-policy').value;
     const edgeAccessMode = projectField(card, 'edge-access').value;
+    const entryAccessMode = projectField(card, 'entry-access').value;
     const originProtectionMode = projectField(card, 'origin-protection').value;
     const cachePolicy = projectField(card, 'cache-policy').value;
     const cookieDomainPolicy = projectField(card, 'cookie-domain-policy').value;
@@ -480,6 +537,26 @@ async function generateProductionConfiguration() {
       throw new Error(`应用“${alias}”的 Edge Access 模式无效。`);
     }
 
+    const entryAccess = { mode: entryAccessMode };
+    if (entryAccessMode === 'required') {
+      const entryAlias = projectField(card, 'entry-alias').value.trim();
+      const entryTtlSeconds = Number(projectField(card, 'entry-ttl').value);
+
+      if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(entryAlias)) {
+        selectProject(card);
+        throw new Error(`应用“${alias}”的统一入口 Alias 无效。`);
+      }
+      if (!Number.isInteger(entryTtlSeconds) || entryTtlSeconds < 300 || entryTtlSeconds > 86400) {
+        selectProject(card);
+        throw new Error(`应用“${alias}”的入口通行有效期必须是 300–86400 之间的整数。`);
+      }
+
+      entryAccess.entryAlias = entryAlias;
+      entryAccess.ttlSeconds = entryTtlSeconds;
+    } else if (entryAccessMode !== 'disabled') {
+      throw new Error(`应用“${alias}”的统一入口模式无效。`);
+    }
+
     const originProtection = { mode: originProtectionMode };
     const hostname = `${alias}.${baseDomain}`;
 
@@ -521,12 +598,15 @@ async function generateProductionConfiguration() {
       proxyProfile,
       requestOriginPolicy,
       edgeAccess,
+      entryAccess,
       originProtection,
       allowedMethods,
       cachePolicy,
       cookieDomainPolicy
     };
   }
+
+  validateEntryAccessRelationships(projects);
 
   const routeJson = JSON.stringify(projects);
   const secrets = { ROUTE_PROJECTS_JSON: routeJson };
@@ -542,6 +622,16 @@ async function generateProductionConfiguration() {
     ROUTE_SESSION_TTL_SECONDS: String(ttlSeconds)
   };
   const customDomains = Object.keys(projects).map(alias => `${alias}.${baseDomain}`);
+  const entryLaunchLinks = Object.entries(projects)
+    .filter(([, project]) => project.entryAccess.mode === 'required')
+    .map(([alias, project]) => {
+      const launchUrl = new URL(
+        '/_edge-gateway/launch',
+        `https://${project.entryAccess.entryAlias}.${baseDomain}`
+      );
+      launchUrl.searchParams.set('target', `${alias}.${baseDomain}`);
+      return { alias, entryAlias: project.entryAccess.entryAlias, url: launchUrl.toString() };
+    });
   const deployArguments = [
     'npx wrangler deploy',
     `  --name ${shellQuote(workerName)}`,
@@ -569,7 +659,10 @@ async function generateProductionConfiguration() {
   const checkCommand = `${deployCommandPrefix} --check`;
   const dryRunCommand = `${deployCommandPrefix} --dry-run`;
   const deployCommand = deployCommandPrefix;
-  const healthCheckCommands = customDomains
+  const healthCheckDomains = Object.entries(projects)
+    .filter(([, project]) => project.entryAccess.mode !== 'required')
+    .map(([alias]) => `${alias}.${baseDomain}`);
+  const healthCheckCommands = healthCheckDomains
     .map(domain => `curl -fsS ${shellQuote(`https://${domain}/_edge-gateway/health`)}`)
     .join('\n');
   const advancedInspectionCommands = [
@@ -613,6 +706,7 @@ async function generateProductionConfiguration() {
     secrets,
     vars,
     customDomains,
+    entryLaunchLinks,
     wafSecrets,
     variablesFile,
     variablesFileName,
@@ -638,11 +732,15 @@ function renderGeneratedConfiguration(generated) {
   document.querySelector('#verify-command-output').value = generated.healthCheckCommands;
   document.querySelector('#advanced-inspection-output').value = generated.advancedInspectionCommands;
   document.querySelector('#complete-deploy-flow-output').value = generated.completeDeployFlow;
+  document.querySelector('#entry-launch-output').value = generated.entryLaunchLinks
+    .map(item => `${item.alias}: ${item.url}`)
+    .join('\n');
   document.querySelector('#generated-hostnames').textContent = generated.customDomains.join(', ');
   document.querySelector('#generated-vars').textContent = Object.keys(generated.vars).join(', ');
   document.querySelector('#generated-secret-names').textContent = Object.keys(generated.secrets).join(', ');
   renderWafSecrets(generated.wafSecrets);
   document.querySelector('#waf-empty').hidden = generated.wafSecrets.length !== 0;
+  document.querySelector('#entry-empty').hidden = generated.entryLaunchLinks.length !== 0;
   document.querySelector('#config-export-result-button').disabled = false;
 }
 
@@ -675,6 +773,7 @@ function renderWafSecrets(wafSecrets) {
 
 function markOutputsStale() {
   latestGenerated = null;
+  markVerificationConfigurationStale();
   document.querySelector('#config-export-result-button').disabled = true;
   const resultStepButton = document.querySelector('.wizard-nav [data-step-target="3"]');
   if (resultStepButton) resultStepButton.disabled = true;
@@ -692,6 +791,7 @@ function clearProductionOutputs() {
     '#config-deploy-command-output',
     '#verify-command-output',
     '#advanced-inspection-output',
+    '#entry-launch-output',
     '#complete-deploy-flow-output'
   ]) {
     document.querySelector(selector).value = '';
@@ -709,7 +809,10 @@ function resetGenerator() {
   addProject();
   clearProductionOutputs();
   latestGenerated = null;
+  setVerificationConfiguration(null);
+  document.querySelector('#verify-hostname').value = '';
   document.querySelector('#config-export-result-button').disabled = true;
+  document.querySelector('.wizard-nav [data-step-target="3"]').disabled = true;
   setStatus('#generate-status', '', false);
   setStatus('#session-secret-status', '', false);
   setStatus('#export-status', '', false);
@@ -765,6 +868,12 @@ async function importVariablesFile(file) {
   syncAllHostnames();
   selectProject(document.querySelector('[data-project]'));
   markOutputsStale();
+  setVerificationConfiguration({
+    baseDomain: imported.baseDomain,
+    projects: Object.fromEntries(imported.projects.map(project => [project.alias, project.route])),
+    sessionSecret: imported.sessionSecret,
+    source: `已导入的变量文件（${imported.projects.length} 个应用）`
+  });
 
   setStatus(
     '#config-file-status',
@@ -835,6 +944,8 @@ function validateVariablesFile(value) {
     importedProjects.push({ alias, route, originSecret });
   }
 
+  validateEntryAccessRelationships(projects);
+
   const sessionSecret = String(secrets.ROUTE_SESSION_SECRET || '');
   if (needsSessionSecret && sessionSecret.length < 32) {
     throw new Error('变量文件缺少有效的 ROUTE_SESSION_SECRET。');
@@ -856,47 +967,74 @@ function validateVariablesFile(value) {
 
 async function verifyExistingConfiguration() {
   const status = document.querySelector('#verify-status');
+  const passwordInput = document.querySelector('#verify-password');
   status.dataset.error = 'true';
   status.textContent = '正在检查…';
 
   try {
-    const hostname = parseHostname(document.querySelector('#verify-hostname').value);
-    const baseDomain = parseBaseDomain(document.querySelector('#verify-base-domain').value, false);
-    const projects = parseProjects(document.querySelector('#verify-projects').value);
-    const aliases = Object.keys(projects);
-    let alias;
-
-    if (baseDomain) {
-      if (!hostname.endsWith(`.${baseDomain}`)) {
-        throw new Error(`访问域名不属于 ROUTE_BASE_DOMAIN：${baseDomain}`);
-      }
-      alias = hostname.slice(0, -(baseDomain.length + 1));
-    } else if (aliases.length === 1) {
-      [alias] = aliases;
-    } else {
-      throw new Error('多应用配置必须填写 ROUTE_BASE_DOMAIN。');
+    if (!verificationConfiguration) {
+      throw new Error('尚未载入可验证的配置，请先在“配置生成器”中导入变量文件或生成完整配置。');
     }
 
+    const hostname = parseHostname(document.querySelector('#verify-hostname').value);
+    const { baseDomain, projects, sessionSecret } = verificationConfiguration;
+
+    if (!hostname.endsWith(`.${baseDomain}`)) {
+      throw new Error(`访问域名不属于当前配置的基础域名：${baseDomain}`);
+    }
+    const alias = hostname.slice(0, -(baseDomain.length + 1));
+
     const project = projects[alias];
-    if (!project) throw new Error(`域名前缀“${alias}”在 ROUTE_PROJECTS_JSON 中不存在。`);
+    if (!project) throw new Error(`当前配置中不存在域名前缀“${alias}”对应的应用。`);
     validateProject(project);
+    validateEntryAccessRelationships(projects);
+
+    const entryMessage = project.entryAccess?.mode === 'required'
+      ? `，且必须从统一入口“${project.entryAccess.entryAlias}”进入`
+      : '';
 
     if (project.edgeAccess.mode === 'disabled') {
       status.dataset.error = 'false';
-      status.textContent = `检查通过：域名匹配应用“${alias}”，Edge Access 已禁用。`;
+      status.textContent = `检查通过：域名匹配应用“${alias}”，Edge Access 已禁用${entryMessage}。`;
       return;
     }
 
-    const password = document.querySelector('#verify-password').value;
-    const secret = document.querySelector('#verify-secret').value;
-    const matches = await verifyPassword(password, project.edgeAccess.passwordHash, secret);
+    const password = passwordInput.value;
+    if (!password) throw new Error(`应用“${alias}”启用了 Gateway 密码登录，请填写访问密码。`);
+    const matches = await verifyPassword(password, project.edgeAccess.passwordHash, sessionSecret);
     if (!matches) throw new Error(`域名已匹配应用“${alias}”，但密码与 passwordHash 不匹配。`);
 
     status.dataset.error = 'false';
-    status.textContent = `检查通过：域名匹配应用“${alias}”，密码散列有效。`;
+    status.textContent = `检查通过：域名匹配应用“${alias}”，密码散列有效${entryMessage}。`;
   } catch (error) {
     status.textContent = error.message;
+  } finally {
+    passwordInput.value = '';
   }
+}
+
+function setVerificationConfiguration(configuration) {
+  const context = document.querySelector('#verification-context');
+  document.querySelector('#verify-password').value = '';
+  setStatus('#verify-status', '', false);
+
+  if (!configuration) {
+    verificationConfiguration = null;
+    context.textContent = '尚未载入可验证的配置，请先在“配置生成器”中导入变量文件或生成完整配置。';
+    return;
+  }
+
+  verificationConfiguration = { ...configuration, stale: false };
+  context.textContent = `校验来源：${configuration.source}。配置和 Secret 自动从当前页面内存读取。`;
+}
+
+function markVerificationConfigurationStale() {
+  if (!verificationConfiguration || verificationConfiguration.stale) return;
+  verificationConfiguration.stale = true;
+  document.querySelector('#verification-context').textContent = [
+    `校验来源：${verificationConfiguration.source}。`,
+    '生成器中有尚未生成的修改，当前仍验证最近一次完整配置。'
+  ].join('');
 }
 
 function validateProject(project) {
@@ -913,6 +1051,24 @@ function validateProject(project) {
     throw new Error('edgeAccess.mode 必须是 disabled 或 required。');
   }
   if (project.edgeAccess.mode === 'required') validatePasswordHash(project.edgeAccess.passwordHash);
+  const entryAccess = project.entryAccess === undefined
+    ? { mode: 'disabled' }
+    : project.entryAccess;
+  if (!entryAccess || Array.isArray(entryAccess) || typeof entryAccess !== 'object') {
+    throw new Error('entryAccess 必须是对象。');
+  }
+  if (!['disabled', 'required'].includes(entryAccess.mode)) {
+    throw new Error('entryAccess.mode 必须是 disabled 或 required。');
+  }
+  if (entryAccess.mode === 'required') {
+    if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(entryAccess.entryAlias)) {
+      throw new Error('entryAccess.entryAlias 必须是有效 Alias。');
+    }
+    const entryTtlSeconds = entryAccess.ttlSeconds === undefined ? 1800 : entryAccess.ttlSeconds;
+    if (!Number.isInteger(entryTtlSeconds) || entryTtlSeconds < 300 || entryTtlSeconds > 86400) {
+      throw new Error('entryAccess.ttlSeconds 必须是 300–86400 之间的整数。');
+    }
+  }
   if (!['disabled', 'required'].includes(project.originProtection?.mode)) {
     throw new Error('originProtection.mode 必须是 disabled 或 required。');
   }
@@ -937,6 +1093,29 @@ function validateProject(project) {
     originProtectionMode: project.originProtection.mode,
     allowedMethods
   });
+}
+
+function validateEntryAccessRelationships(projects) {
+  for (const [alias, project] of Object.entries(projects)) {
+    const entryAccess = project.entryAccess === undefined
+      ? { mode: 'disabled' }
+      : project.entryAccess;
+    if (entryAccess.mode !== 'required') continue;
+
+    const entryProject = projects[entryAccess.entryAlias];
+    if (!entryProject || entryAccess.entryAlias === alias) {
+      throw new Error(`应用“${alias}”的统一入口 Alias 必须引用另一个已配置应用。`);
+    }
+    if (project.deliveryMode !== 'proxy' || entryProject.deliveryMode !== 'proxy') {
+      throw new Error(`应用“${alias}”及其统一入口“${entryAccess.entryAlias}”都必须使用反向代理。`);
+    }
+    if (entryProject.edgeAccess?.mode !== 'required') {
+      throw new Error(`统一入口“${entryAccess.entryAlias}”必须启用 Gateway 密码登录。`);
+    }
+    if ((entryProject.entryAccess?.mode || 'disabled') !== 'disabled') {
+      throw new Error(`统一入口“${entryAccess.entryAlias}”不能再依赖其他统一入口。`);
+    }
+  }
 }
 
 function validateDeliveryOptions({

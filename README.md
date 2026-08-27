@@ -1,6 +1,6 @@
 # Edge App Gateway
 
-面向 Vercel 应用的零侵入 Cloudflare Workers 边缘网关：通过统一自定义域名入口提供多应用 Host 路由、可选密码访问、隔离会话、源站保护和安全反向代理。
+面向 Vercel 应用的零侵入 Cloudflare Workers 边缘网关：通过统一自定义域名入口提供多应用 Host 路由、可选密码访问、统一入口签名通行、隔离会话、源站保护和安全反向代理。
 
 Zero-intrusion application gateway and reverse proxy for exposing multiple Vercel apps through Cloudflare Workers and custom domains.
 
@@ -11,6 +11,7 @@ Zero-intrusion application gateway and reverse proxy for exposing multiple Verce
 - **零侵入接入**：默认只需提供 Alias 和 Vercel Production URL。
 - **多应用统一入口**：一个 Worker 根据精确 Host 路由多个应用。
 - **独立访问策略**：每个应用可单独启用或关闭 Gateway 密码认证。
+- **统一入口限制**：指定 Demo 必须由已认证入口签发短时票据；直接访问 Demo 自定义域名只得到无标识 404。
 - **源站防绕过**：为每个 Vercel 项目注入独立 Secret，配合 Vercel WAF 拒绝直连。
 - **全栈透明代理**：支持常用 HTTP 方法、流式请求与响应、应用 Cookie、Authorization 和重定向。
 - **离线可视化配置**：在浏览器本地生成完整路由、Secrets、Custom Domains 和部署文件，不上传配置或凭据。
@@ -21,6 +22,7 @@ Zero-intrusion application gateway and reverse proxy for exposing multiple Verce
 浏览器访问 alias.apps.example.com
                 ↓
 Cloudflare Worker 按 Host 选择应用
+        ├─ 可选：验证统一入口签发的 Host 绑定通行
         ├─ 可选：验证 Gateway Edge Access
         ├─ 校验并按需改写 Origin / Referer
         └─ 注入该项目独立的 Origin Secret
@@ -49,6 +51,8 @@ Gateway 不替代上游应用认证。关闭 Edge Access 只会跳过 Gateway �
    ```
 
 6. 确认自定义域名访问正常后，将 Vercel WAF Rule 切换为 `Deny`。
+
+若 Demo 还要求“只能从统一入口项目点击进入”，请把入口项目和 Demo 放在同一份 Gateway 路由表中：入口启用 Edge Access，Demo 的 `entryAccess.entryAlias` 指向入口。入口页面使用相对路径 `/_edge-gateway/launch?target=<Demo 域名>&next=/`；Gateway 校验同源用户导航并签发单次兑换票据，入口无需保存 Session Secret。详见[配置与安全](./cloudflare-worker/docs/CONFIGURATION.md#统一入口访问控制)。
 
 完整流程和首次部署前置条件见[快速开始](./cloudflare-worker/docs/QUICKSTART.md)与[部署手册](./cloudflare-worker/docs/DEPLOYMENT.md)。
 

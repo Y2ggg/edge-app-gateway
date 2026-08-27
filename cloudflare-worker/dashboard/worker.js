@@ -54,10 +54,11 @@ function buildUpstreamHeaders(headers, options = {}) {
   if (options.originHeaderName) {
     upstreamHeaders.delete(options.originHeaderName);
   }
-  const cookie = removeCookie(
-    upstreamHeaders.get("cookie"),
-    options.sessionCookieName || "route_session"
-  );
+  const sessionCookieNames = Array.isArray(options.sessionCookieNames) ? options.sessionCookieNames : [options.sessionCookieName || "route_session"];
+  let cookie = upstreamHeaders.get("cookie");
+  for (const cookieName of sessionCookieNames) {
+    cookie = removeCookie(cookie, cookieName);
+  }
   if (cookie) {
     upstreamHeaders.set("cookie", cookie);
   } else {
@@ -157,7 +158,7 @@ function rewriteLocation(location, upstreamUrl, proxyOrigin) {
 }
 function sanitizeNextPath(rawPath) {
   const nextPath = typeof rawPath === "string" ? rawPath : "/";
-  if (!nextPath.startsWith("/") || nextPath.startsWith("//") || /[\r\n]/.test(nextPath)) {
+  if (!nextPath.startsWith("/") || nextPath.startsWith("//") || nextPath.includes("\\") || /[\r\n]/.test(nextPath)) {
     return "/";
   }
   if (nextPath.startsWith("/_edge-gateway/")) {
@@ -217,6 +218,9 @@ var ROUTE_ALIAS_PATTERN = /^[a-z0-9][a-z0-9-]{2,62}$/;
 var SECRET_BINDING_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
 var HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 var MAX_ROUTE_COUNT = 200;
+var DEFAULT_ENTRY_SESSION_TTL_SECONDS = 1800;
+var MIN_ENTRY_SESSION_TTL_SECONDS = 300;
+var MAX_ENTRY_SESSION_TTL_SECONDS = 86400;
 var SUPPORTED_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 var SUPPORTED_METHOD_SET = new Set(SUPPORTED_METHODS);
 var FORBIDDEN_ORIGIN_HEADERS = /* @__PURE__ */ new Set([
@@ -271,6 +275,7 @@ function parseRouteProjects(rawConfig) {
   for (const [alias, rawProject] of entries) {
     projects.set(alias, parseProject(alias, rawProject));
   }
+  validateEntryAccessRelationships(projects);
   return projects;
 }
 function parseProject(alias, project) {
@@ -290,6 +295,7 @@ function parseProject(alias, project) {
     ["preserve", "rewrite-to-upstream"]
   );
   const edgeAccess = parseEdgeAccess(alias, project.edgeAccess);
+  const entryAccess = parseEntryAccess(alias, project.entryAccess);
   const originProtection = parseOriginProtection(alias, project.originProtection);
   const allowedMethods = parseAllowedMethods(alias, project.allowedMethods, proxyProfile);
   const cachePolicy = project.cachePolicy === void 0 ? "no-store" : requireEnum(alias, "cachePolicy", project.cachePolicy, ["assets-only", "no-store"]);
@@ -315,11 +321,63 @@ function parseProject(alias, project) {
     proxyProfile,
     requestOriginPolicy,
     edgeAccess,
+    entryAccess,
     originProtection,
     allowedMethods,
     cachePolicy,
     cookieDomainPolicy
   });
+}
+function parseEntryAccess(alias, entryAccess) {
+  if (entryAccess === void 0) {
+    return Object.freeze({ mode: "disabled" });
+  }
+  if (entryAccess === null || Array.isArray(entryAccess) || typeof entryAccess !== "object") {
+    throw new RouteConfigurationError(`Application ${alias} entryAccess must be an object`);
+  }
+  const mode = requireEnum(alias, "entryAccess.mode", entryAccess.mode, ["disabled", "required"]);
+  if (mode === "disabled") {
+    return Object.freeze({ mode });
+  }
+  const entryAlias = entryAccess.entryAlias;
+  const ttlSeconds = entryAccess.ttlSeconds === void 0 ? DEFAULT_ENTRY_SESSION_TTL_SECONDS : entryAccess.ttlSeconds;
+  if (!isValidRouteAlias(entryAlias)) {
+    throw new RouteConfigurationError(
+      `Application ${alias} entryAccess.entryAlias must be a valid route alias`
+    );
+  }
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds < MIN_ENTRY_SESSION_TTL_SECONDS || ttlSeconds > MAX_ENTRY_SESSION_TTL_SECONDS) {
+    throw new RouteConfigurationError(
+      `Application ${alias} entryAccess.ttlSeconds must be between ${MIN_ENTRY_SESSION_TTL_SECONDS} and ${MAX_ENTRY_SESSION_TTL_SECONDS}`
+    );
+  }
+  return Object.freeze({ mode, entryAlias, ttlSeconds });
+}
+function validateEntryAccessRelationships(projects) {
+  for (const [alias, project] of projects) {
+    if (project.entryAccess.mode !== "required") continue;
+    const entryProject = projects.get(project.entryAccess.entryAlias);
+    if (!entryProject || project.entryAccess.entryAlias === alias) {
+      throw new RouteConfigurationError(
+        `Application ${alias} entryAccess.entryAlias must reference another configured application`
+      );
+    }
+    if (project.deliveryMode !== "proxy" || entryProject.deliveryMode !== "proxy") {
+      throw new RouteConfigurationError(
+        `Application ${alias} and its entry application must use proxy delivery`
+      );
+    }
+    if (entryProject.edgeAccess.mode !== "required") {
+      throw new RouteConfigurationError(
+        `Entry application ${project.entryAccess.entryAlias} must require Edge Access`
+      );
+    }
+    if (entryProject.entryAccess.mode !== "disabled") {
+      throw new RouteConfigurationError(
+        `Entry application ${project.entryAccess.entryAlias} cannot require another entry application`
+      );
+    }
+  }
 }
 function parseTarget(alias, target) {
   if (typeof target !== "string" || !target) {
@@ -420,6 +478,12 @@ var PASSWORD_KEY_BYTES = 32;
 var MINIMUM_SECRET_LENGTH = 32;
 var PASSWORD_HASH_PREFIX = "hmac-sha256";
 var PASSWORD_MESSAGE_PREFIX = "route-password-v1\0";
+var ENTRY_HANDOFF_KIND = "entry-handoff-v1";
+var ENTRY_SESSION_KIND = "entry-session-v1";
+var ENTRY_TOKEN_PREFIX = "e2";
+var ENTRY_TOKEN_MESSAGE_PREFIX = "route-entry-v2";
+var ENTRY_TOKEN_NONCE_BYTES = 16;
+var BASE64_URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 async function verifyWorkerPassword(password, encodedHash, secret) {
   if (typeof password !== "string" || password.length === 0 || password.length > 256) {
     return false;
@@ -469,6 +533,21 @@ async function verifyWorkerSessionToken(token, alias, secret, options = {}) {
   const nowSeconds = Math.floor((options.now ?? Date.now()) / 1e3);
   return parsed?.alias === alias && Number.isInteger(parsed.exp) && parsed.exp > nowSeconds;
 }
+function createEntryHandoffToken(entryAlias, targetAlias, secret, options = {}) {
+  return createEntryToken(ENTRY_HANDOFF_KIND, entryAlias, targetAlias, secret, {
+    ...options,
+    ttlSeconds: options.ttlSeconds ?? 30
+  });
+}
+function verifyEntryHandoffToken(token, entryAlias, targetAlias, secret, options = {}) {
+  return verifyEntryToken(token, ENTRY_HANDOFF_KIND, entryAlias, targetAlias, secret, options);
+}
+function createEntrySessionToken(entryAlias, targetAlias, secret, options = {}) {
+  return createEntryToken(ENTRY_SESSION_KIND, entryAlias, targetAlias, secret, options);
+}
+function verifyEntrySessionToken(token, entryAlias, targetAlias, secret, options = {}) {
+  return verifyEntryToken(token, ENTRY_SESSION_KIND, entryAlias, targetAlias, secret, options);
+}
 function parseWorkerSessionTtl(rawValue) {
   if (rawValue === void 0 || rawValue === "") {
     return 28800;
@@ -482,6 +561,72 @@ function parseWorkerSessionTtl(rawValue) {
 async function passwordDigest(password, salt, secret) {
   const message = `${PASSWORD_MESSAGE_PREFIX}${bytesToBase64Url(salt)}\0${password}`;
   return signBytes(message, secret);
+}
+async function createEntryToken(kind, entryAlias, targetAlias, secret, options) {
+  validateSecret(secret);
+  validateTokenAlias(entryAlias);
+  validateTokenAlias(targetAlias);
+  const ttlSeconds = options.ttlSeconds;
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0) {
+    throw new TypeError("Entry token lifetime must be a positive integer");
+  }
+  const nowSeconds = Math.floor((options.now ?? Date.now()) / 1e3);
+  const expiresAt = nowSeconds + ttlSeconds;
+  const nonceBytes = options.nonce ?? crypto.getRandomValues(
+    new Uint8Array(ENTRY_TOKEN_NONCE_BYTES)
+  );
+  if (!(nonceBytes instanceof Uint8Array) || nonceBytes.length !== ENTRY_TOKEN_NONCE_BYTES) {
+    throw new TypeError(`Entry token nonce must contain ${ENTRY_TOKEN_NONCE_BYTES} bytes`);
+  }
+  const nonce = bytesToBase64Url(nonceBytes);
+  const signature = await sign(
+    entryTokenMessage(kind, entryAlias, targetAlias, expiresAt, nonce, options.binding),
+    secret
+  );
+  return `${ENTRY_TOKEN_PREFIX}.${expiresAt}.${nonce}.${signature}`;
+}
+async function verifyEntryToken(token, kind, entryAlias, targetAlias, secret, options) {
+  validateSecret(secret);
+  validateTokenAlias(entryAlias);
+  validateTokenAlias(targetAlias);
+  const [prefix, expiresText, nonce, providedSignature, ...extra] = String(token || "").split(".");
+  if (prefix !== ENTRY_TOKEN_PREFIX || !/^\d+$/.test(expiresText || "") || !BASE64_URL_PATTERN.test(nonce || "") || !BASE64_URL_PATTERN.test(providedSignature || "") || extra.length > 0) {
+    return false;
+  }
+  const expiresAt = Number(expiresText);
+  if (!Number.isSafeInteger(expiresAt) || String(expiresAt) !== expiresText) return false;
+  try {
+    if (base64UrlToBytes(nonce).length !== ENTRY_TOKEN_NONCE_BYTES) return false;
+  } catch {
+    return false;
+  }
+  const expectedSignature = await sign(
+    entryTokenMessage(kind, entryAlias, targetAlias, expiresAt, nonce, options.binding),
+    secret
+  );
+  if (!constantTimeEqual(
+    encoder.encode(providedSignature),
+    encoder.encode(expectedSignature)
+  )) {
+    return false;
+  }
+  const nowSeconds = Math.floor((options.now ?? Date.now()) / 1e3);
+  return expiresAt > nowSeconds;
+}
+function entryTokenMessage(kind, entryAlias, targetAlias, expiresAt, nonce, binding) {
+  const parts = [
+    ENTRY_TOKEN_MESSAGE_PREFIX,
+    kind,
+    entryAlias,
+    targetAlias,
+    String(expiresAt),
+    nonce
+  ];
+  if (binding !== void 0) {
+    validateTokenBinding(binding);
+    parts.push(binding);
+  }
+  return parts.join("\0");
 }
 async function sign(payload, secret) {
   return bytesToBase64Url(await signBytes(payload, secret));
@@ -500,6 +645,16 @@ async function signBytes(payload, secret) {
 function validateSecret(secret) {
   if (typeof secret !== "string" || secret.length < MINIMUM_SECRET_LENGTH) {
     throw new TypeError(`ROUTE_SESSION_SECRET must contain at least ${MINIMUM_SECRET_LENGTH} characters`);
+  }
+}
+function validateTokenAlias(alias) {
+  if (typeof alias !== "string" || alias.length === 0 || alias.length > 63) {
+    throw new TypeError("Entry token aliases must contain between 1 and 63 characters");
+  }
+}
+function validateTokenBinding(binding) {
+  if (typeof binding !== "string" || binding.length === 0 || binding.length > 4096) {
+    throw new TypeError("Entry token binding must contain between 1 and 4096 characters");
   }
 }
 function constantTimeEqual(left, right) {
@@ -526,14 +681,55 @@ function base64UrlToBytes(value) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+// src/entry-ticket-redeemer.js
+var REDEEMED_KEY = "redeemed";
+var MAX_EXPIRATION_AHEAD_MS = 5 * 60 * 1e3;
+var EntryTicketRedeemer = class {
+  constructor(state) {
+    this.state = state;
+  }
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (request.method !== "POST" || url.pathname !== "/consume") {
+      return new Response(null, { status: 404 });
+    }
+    let expiresAt;
+    try {
+      ({ expiresAt } = await request.json());
+    } catch {
+      return new Response(null, { status: 400 });
+    }
+    const now = Date.now();
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= now || expiresAt > now + MAX_EXPIRATION_AHEAD_MS) {
+      return new Response(null, { status: 400 });
+    }
+    const consumed = await this.state.storage.transaction(async (transaction) => {
+      if (await transaction.get(REDEEMED_KEY)) return false;
+      await transaction.put(REDEEMED_KEY, expiresAt);
+      return true;
+    });
+    if (!consumed) {
+      return new Response(null, { status: 409 });
+    }
+    await this.state.storage.setAlarm(expiresAt);
+    return new Response(null, { status: 204 });
+  }
+  async alarm() {
+    await this.state.storage.deleteAll();
+  }
+};
+
 // src/worker.js
 var SESSION_COOKIE_NAME = "route_session";
+var ENTRY_SESSION_COOKIE_NAME = "entry_session";
 var GATEWAY_PREFIX = "/_edge-gateway/";
 var LOGIN_PATH = `${GATEWAY_PREFIX}login`;
 var LOGOUT_PATH = `${GATEWAY_PREFIX}logout`;
 var SESSION_PATH = `${GATEWAY_PREFIX}session`;
+var ENTRY_LAUNCH_PATH = `${GATEWAY_PREFIX}launch`;
+var ENTRY_ACCEPT_PATH = `${GATEWAY_PREFIX}entry`;
 var HEALTH_PATH = `${GATEWAY_PREFIX}health`;
-var WORKER_BUILD_ID = "2026-08-21-gateway-v5";
+var WORKER_BUILD_ID = "2026-08-27-gateway-v9";
 var DUMMY_PASSWORD_HASH = "hmac-sha256$ZHVtbXktcm91dGUtc2FsdA$7VCcQ_9KLIdA9rWiYngmq7WGpRLkQkrmKULgLmqv_5M";
 var DUMMY_SESSION_SECRET = "dummy-session-secret-for-unresolved-routes";
 var LOGIN_FAILURE_LIMIT = 5;
@@ -580,13 +776,6 @@ async function handleWorkerRequest(request, env, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now();
   const url = new URL(request.url);
-  if (url.pathname === HEALTH_PATH) {
-    return jsonResponse({
-      ok: true,
-      build: WORKER_BUILD_ID,
-      edge: request.cf?.colo || "local"
-    });
-  }
   let projects;
   let alias;
   try {
@@ -597,14 +786,34 @@ async function handleWorkerRequest(request, env, options = {}) {
     return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
   }
   const project = alias ? projects.get(alias) : null;
+  if (url.pathname === HEALTH_PATH) {
+    if (!project || project.entryAccess.mode === "required") {
+      return entryConcealmentResponse(request);
+    }
+    return jsonResponse({
+      ok: true,
+      build: WORKER_BUILD_ID,
+      edge: request.cf?.colo || "local"
+    });
+  }
   if (url.pathname.startsWith(GATEWAY_PREFIX)) {
     return handleGatewayRequest(request, url, alias, project, env, {
       ...options,
+      projects,
       now
     });
   }
   if (!project) {
     return gatewayError("EDGE_ROUTE_NOT_FOUND", "\u8BF7\u6C42\u7684\u5165\u53E3\u4E0D\u53EF\u7528", 404);
+  }
+  if (project.entryAccess.mode === "required") {
+    const authorized = await verifyEntrySession(request, alias, project, env, now);
+    if (authorized === null) {
+      return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
+    }
+    if (!authorized) {
+      return entryConcealmentResponse(request);
+    }
   }
   if (!project.allowedMethods.includes(request.method)) {
     return methodNotAllowed(project.allowedMethods);
@@ -629,6 +838,27 @@ async function handleWorkerRequest(request, env, options = {}) {
   return proxyRequest(request, url, project, env, fetchImpl);
 }
 async function handleGatewayRequest(request, url, alias, project, env, options) {
+  if (project?.entryAccess.mode === "required" && url.pathname !== ENTRY_ACCEPT_PATH) {
+    const authorized = await verifyEntrySession(request, alias, project, env, options.now);
+    if (authorized === null) {
+      return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
+    }
+    if (!authorized) {
+      return entryConcealmentResponse(request);
+    }
+  }
+  if (url.pathname === ENTRY_LAUNCH_PATH) {
+    if (request.method !== "GET") {
+      return entryConcealmentResponse(request);
+    }
+    return createEntryHandoffResponse(request, url, alias, project, env, options);
+  }
+  if (url.pathname === ENTRY_ACCEPT_PATH) {
+    if (request.method !== "GET") {
+      return entryConcealmentResponse(request);
+    }
+    return acceptEntryHandoff(request, url, alias, project, env, options);
+  }
   if (url.pathname === LOGIN_PATH) {
     if (request.method === "GET") {
       return loginResponse(url);
@@ -668,6 +898,106 @@ async function handleGatewayRequest(request, url, alias, project, env, options) 
     return jsonResponse({ authenticated });
   }
   return gatewayError("EDGE_GATEWAY_ENDPOINT_NOT_FOUND", "\u7F51\u5173\u63A5\u53E3\u4E0D\u5B58\u5728", 404);
+}
+async function createEntryHandoffResponse(request, url, alias, project, env, options) {
+  if (!alias || !project || project.entryAccess.mode !== "disabled" || project.edgeAccess.mode !== "required" || !isTrustedEntryLaunch(request, url)) {
+    return entryConcealmentResponse(request);
+  }
+  const authenticated = await verifyGatewaySession(request, alias, env, options.now);
+  if (authenticated === null) {
+    return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
+  }
+  if (!authenticated) {
+    return entryConcealmentResponse(request);
+  }
+  const targetAlias = resolveEntryTargetAlias(
+    url.searchParams.get("target"),
+    env,
+    options.projects
+  );
+  const targetProject = targetAlias ? options.projects.get(targetAlias) : null;
+  if (!targetProject || targetProject.entryAccess.mode !== "required" || targetProject.entryAccess.entryAlias !== alias) {
+    return entryConcealmentResponse(request);
+  }
+  const nextPath = sanitizeNextPath(url.searchParams.get("next"));
+  let ticket;
+  let acceptUrl;
+  try {
+    ticket = await createEntryHandoffToken(alias, targetAlias, env.ROUTE_SESSION_SECRET, {
+      now: options.now,
+      binding: nextPath
+    });
+    const baseDomain = normalizeBaseDomain(env.ROUTE_BASE_DOMAIN);
+    if (!baseDomain) throw new TypeError("Entry handoff requires ROUTE_BASE_DOMAIN");
+    acceptUrl = new URL(ENTRY_ACCEPT_PATH, `https://${targetAlias}.${baseDomain}`);
+  } catch (error) {
+    console.error("Worker entry handoff configuration is invalid:", error.name);
+    return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
+  }
+  acceptUrl.searchParams.set("ticket", ticket);
+  acceptUrl.searchParams.set("next", nextPath);
+  return new Response(null, {
+    status: 303,
+    headers: {
+      "Cache-Control": "private, no-store",
+      Location: acceptUrl.toString(),
+      "Referrer-Policy": "no-referrer"
+    }
+  });
+}
+async function acceptEntryHandoff(request, url, alias, project, env, options) {
+  if (!alias || !project || project.entryAccess.mode !== "required") {
+    return entryConcealmentResponse(request);
+  }
+  const ticket = url.searchParams.get("ticket");
+  const nextPath = sanitizeNextPath(url.searchParams.get("next"));
+  let valid;
+  try {
+    valid = await verifyEntryHandoffToken(
+      ticket,
+      project.entryAccess.entryAlias,
+      alias,
+      env.ROUTE_SESSION_SECRET,
+      { now: options.now, binding: nextPath }
+    );
+  } catch (error) {
+    console.error("Worker entry handoff configuration is invalid:", error.name);
+    return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
+  }
+  if (!valid) {
+    return entryConcealmentResponse(request);
+  }
+  let redeemed;
+  try {
+    const redeemTicket = options.entryTicketRedeemer ?? redeemEntryHandoffTicket;
+    redeemed = await redeemTicket(ticket, env);
+  } catch (error) {
+    console.error("Worker entry ticket redeemer is unavailable:", error.name);
+    return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
+  }
+  if (!redeemed) {
+    return entryConcealmentResponse(request);
+  }
+  try {
+    const token = await createEntrySessionToken(
+      project.entryAccess.entryAlias,
+      alias,
+      env.ROUTE_SESSION_SECRET,
+      { now: options.now, ttlSeconds: project.entryAccess.ttlSeconds }
+    );
+    return new Response(null, {
+      status: 303,
+      headers: {
+        "Cache-Control": "private, no-store",
+        Location: nextPath,
+        "Referrer-Policy": "no-referrer",
+        "Set-Cookie": buildEntrySessionCookie(token, project.entryAccess.ttlSeconds)
+      }
+    });
+  } catch (error) {
+    console.error("Worker entry session configuration is invalid:", error.name);
+    return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
+  }
 }
 async function authenticateRequest(request, url, alias, project, env, options) {
   const nextPath = sanitizeNextPath(url.searchParams.get("next"));
@@ -751,6 +1081,45 @@ async function verifyGatewaySession(request, alias, env, now) {
     return null;
   }
 }
+async function verifyEntrySession(request, alias, project, env, now) {
+  try {
+    return await verifyEntrySessionToken(
+      readCookie(request.headers.get("cookie"), ENTRY_SESSION_COOKIE_NAME),
+      project.entryAccess.entryAlias,
+      alias,
+      env.ROUTE_SESSION_SECRET,
+      { now }
+    );
+  } catch (error) {
+    console.error("Worker entry session configuration is invalid:", error.name);
+    return null;
+  }
+}
+async function redeemEntryHandoffTicket(ticket, env) {
+  const redeemer = env.ENTRY_TICKET_REDEEMER;
+  if (!redeemer || typeof redeemer.idFromName !== "function" || typeof redeemer.get !== "function") {
+    throw new TypeError("ENTRY_TICKET_REDEEMER Durable Object binding is required");
+  }
+  const [, expiresText] = String(ticket || "").split(".");
+  const expiresAt = Number(expiresText) * 1e3;
+  if (!Number.isSafeInteger(expiresAt)) {
+    throw new TypeError("Entry handoff ticket expiration is invalid");
+  }
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(String(ticket))
+  );
+  const ticketKey = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const objectId = redeemer.idFromName(ticketKey);
+  const response = await redeemer.get(objectId).fetch("https://entry-ticket-redeemer/consume", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expiresAt })
+  });
+  if (response.status === 204) return true;
+  if (response.status === 409) return false;
+  throw new TypeError(`Entry ticket redeemer returned ${response.status}`);
+}
 async function proxyRequest(request, requestUrl, project, env, fetchImpl) {
   let upstreamUrl;
   try {
@@ -773,7 +1142,7 @@ async function proxyRequest(request, requestUrl, project, env, fetchImpl) {
   let upstreamHeaders;
   try {
     upstreamHeaders = buildUpstreamHeaders(request.headers, {
-      sessionCookieName: SESSION_COOKIE_NAME,
+      sessionCookieNames: [SESSION_COOKIE_NAME, ENTRY_SESSION_COOKIE_NAME],
       originHeaderName: project.originProtection.headerName,
       originSecret,
       clientHost: requestUrl.host,
@@ -886,7 +1255,10 @@ function resolveWorkerAlias(hostname, env, projects) {
     }
     return null;
   }
-  return projects.size === 1 ? projects.keys().next().value : null;
+  if (projects.size !== 1) {
+    throw new TypeError("ROUTE_BASE_DOMAIN is required for multiple applications");
+  }
+  return projects.keys().next().value;
 }
 function normalizeBaseDomain(rawValue) {
   const value = String(rawValue || "").trim().toLowerCase();
@@ -901,6 +1273,20 @@ function normalizeBaseDomain(rawValue) {
     throw new TypeError("ROUTE_BASE_DOMAIN must be a hostname");
   }
   return value;
+}
+function resolveEntryTargetAlias(rawTarget, env, projects) {
+  const value = String(rawTarget || "").trim().toLowerCase();
+  if (!value) return null;
+  if (isValidRouteAlias(value) && projects.has(value)) return value;
+  let baseDomain;
+  try {
+    baseDomain = normalizeBaseDomain(env.ROUTE_BASE_DOMAIN);
+  } catch {
+    return null;
+  }
+  if (!baseDomain || !value.endsWith(`.${baseDomain}`)) return null;
+  const alias = value.slice(0, -(baseDomain.length + 1));
+  return isValidRouteAlias(alias) && projects.has(alias) ? alias : null;
 }
 function loginResponse(url, options = {}) {
   const showError = options.showError || url.searchParams.get("error") === "unavailable";
@@ -940,6 +1326,16 @@ function isTrustedAuthenticationOrigin(request, url) {
     return false;
   }
 }
+function isTrustedEntryLaunch(request, url) {
+  const fetchSite = String(request.headers.get("sec-fetch-site") || "").toLowerCase();
+  const fetchMode = String(request.headers.get("sec-fetch-mode") || "").toLowerCase();
+  const fetchDestination = String(request.headers.get("sec-fetch-dest") || "").toLowerCase();
+  const fetchUser = String(request.headers.get("sec-fetch-user") || "").toLowerCase();
+  if (fetchSite || fetchMode || fetchDestination || fetchUser) {
+    return fetchSite === "same-origin" && fetchMode === "navigate" && fetchDestination === "document" && fetchUser === "?1";
+  }
+  return isTrustedAuthenticationOrigin(request, url);
+}
 function isDocumentNavigation(request) {
   if (!["GET", "HEAD"].includes(request.method)) {
     return false;
@@ -963,6 +1359,9 @@ function buildSessionCookie(token, ttlSeconds) {
 }
 function clearSessionCookie() {
   return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+}
+function buildEntrySessionCookie(token, ttlSeconds) {
+  return `${ENTRY_SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${ttlSeconds}`;
 }
 function readLoginFailureLimit(store, key, now) {
   const entry = store.get(key);
@@ -1055,6 +1454,37 @@ function gatewayError(code, message, status) {
     }
   });
 }
+function entryConcealmentResponse(request) {
+  const headers = {
+    "Cache-Control": "private, no-store",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Robots-Tag": "noindex, nofollow, noarchive"
+  };
+  if (!isDocumentNavigation(request)) {
+    return new Response(null, { status: 404, headers });
+  }
+  headers["Content-Type"] = "text/html; charset=utf-8";
+  const html = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow,noarchive">
+<title>\u9875\u9762\u65E0\u6CD5\u6253\u5F00</title><style>${CONCEALMENT_PAGE_STYLES}</style></head>
+<body><main class="shell"><section class="error" aria-labelledby="page-title">
+<div class="visual" aria-hidden="true"><svg viewBox="0 0 200 180" role="presentation">
+<rect class="halo" x="10" y="10" width="180" height="160" rx="42"></rect>
+<rect class="window" x="34" y="30" width="132" height="120" rx="13"></rect><path class="window-bar" d="M34 62h132"></path>
+<circle class="error-ring" cx="100" cy="104" r="25"></circle><path class="error-mark" d="m90 94 20 20m0-20-20 20"></path>
+</svg></div>
+<div class="copy"><p class="status"><span></span>404 \xB7 PAGE NOT FOUND</p><h1 id="page-title">\u9875\u9762\u65E0\u6CD5\u6253\u5F00</h1>
+<p class="description">\u8BF7\u68C0\u67E5\u5730\u5740\u62FC\u5199\u662F\u5426\u6B63\u786E\uFF0C\u6216\u7A0D\u540E\u91CD\u65B0\u52A0\u8F7D\u9875\u9762\u3002</p></div>
+</section></main></body></html>`;
+  return new Response(
+    html,
+    { status: 404, headers }
+  );
+}
 function redirectResponse(location) {
   return new Response(null, {
     status: 303,
@@ -1091,7 +1521,9 @@ function escapeHtml(value) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 var PAGE_STYLES = `:root{color-scheme:light;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f5f7fa}*{box-sizing:border-box}body{min-width:320px;min-height:100vh;margin:0;background:#f5f7fa}.shell{display:grid;min-height:100vh;place-items:center;padding:20px}.card{width:min(100%,380px);padding:36px;border:1px solid #e4e9f0;border-radius:18px;background:#fff;box-shadow:0 18px 50px rgb(15 23 42/8%)}.lock{position:relative;width:42px;height:36px;margin:0 auto 24px;border-radius:10px;background:#172033}.lock:before{position:absolute;top:-16px;left:9px;width:20px;height:22px;border:3px solid #172033;border-bottom:0;border-radius:12px 12px 0 0;content:""}.lock:after{position:absolute;top:14px;left:19px;width:4px;height:9px;border-radius:4px;background:#fff;content:""}h1{margin:0;font-size:26px;line-height:1.25;text-align:center}.subtitle{margin:8px 0 26px;color:#7b8494;font-size:14px;text-align:center}.message{display:flex;gap:11px;align-items:center;margin:0 0 16px;padding:12px;border:1px solid #fecaca;border-radius:10px;color:#991b1b;background:#fff5f5}.message[hidden]{display:none}.message span{display:grid;flex:0 0 28px;width:28px;height:28px;place-items:center;border-radius:50%;color:#fff;background:#dc2626;font-weight:800}.message strong{font-size:14px}form{display:grid;gap:12px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}input,button{width:100%;height:48px;border-radius:10px;font:inherit}input{padding:0 14px;border:1px solid #cfd6e1;outline:none;color:#172033;background:#fff}input:focus{border-color:#172033;box-shadow:0 0 0 3px rgb(23 32 51/10%)}button{border:0;color:#fff;background:#172033;font-weight:700;cursor:pointer}.unavailable{text-align:center}.unavailable-mark{display:grid;width:46px;height:46px;margin:0 auto 24px;place-items:center;border-radius:50%;color:#fff;background:#dc2626;font-size:24px;font-weight:800}.unavailable .subtitle{margin-bottom:0}@media(max-width:480px){.card{padding:32px 22px}}`;
+var CONCEALMENT_PAGE_STYLES = `:root{color-scheme:light dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#20242c;background:#f1f3f6}*{box-sizing:border-box}body{min-width:320px;min-height:100vh;margin:0;background:radial-gradient(circle at 22% 18%,rgb(255 255 255/95%) 0,transparent 38%),radial-gradient(circle at 82% 84%,rgb(218 223 232/75%) 0,transparent 34%),#f1f3f6}.shell{display:grid;min-height:100vh;place-items:center;padding:48px 32px}.error{display:grid;grid-template-columns:minmax(280px,340px) minmax(300px,1fr);gap:72px;align-items:center;width:min(100%,900px);min-height:440px;padding:56px 64px;border:1px solid rgb(165 173 185/28%);border-radius:32px;background:rgb(255 255 255/78%);box-shadow:0 30px 80px rgb(35 42 53/10%);backdrop-filter:blur(18px)}.visual{display:grid;min-height:300px;place-items:center;border:1px solid rgb(159 169 182/20%);border-radius:25px;background:linear-gradient(145deg,rgb(245 247 250/95%),rgb(232 236 242/88%));box-shadow:inset 0 1px 0 rgb(255 255 255/85%)}.visual svg{display:block;width:min(78%,230px);height:auto;overflow:visible}.halo{fill:#fff;stroke:#d8dde5;stroke-width:1.5}.window{fill:#f8f9fb;stroke:#78818d;stroke-width:3}.window-bar{fill:none;stroke:#b8bfc9;stroke-width:3}.error-ring{fill:#737c88}.error-mark{fill:none;stroke:#fff;stroke-linecap:round;stroke-width:4}.copy{padding:10px 0}.status{display:flex;gap:10px;align-items:center;margin:0 0 24px;color:#858d99;font-size:11px;font-weight:760;letter-spacing:.14em}.status span{width:24px;height:2px;border-radius:2px;background:#858d99}.error h1{margin:0;color:#20242c;font-size:clamp(36px,4vw,46px);font-weight:720;letter-spacing:-.045em;line-height:1.16}.description{max-width:360px;margin:20px 0 0;color:#6e7682;font-size:16px;line-height:1.85}@media(prefers-color-scheme:dark){:root{color:#eef1f5;background:#111318}body{background:radial-gradient(circle at 22% 18%,rgb(45 50 59/65%) 0,transparent 38%),radial-gradient(circle at 82% 84%,rgb(37 41 49/75%) 0,transparent 34%),#111318}.error{border-color:rgb(137 147 160/18%);background:rgb(28 31 37/82%);box-shadow:0 32px 90px rgb(0 0 0/34%)}.visual{border-color:rgb(145 154 166/16%);background:linear-gradient(145deg,rgb(42 46 54/92%),rgb(31 34 40/92%));box-shadow:inset 0 1px 0 rgb(255 255 255/5%)}.halo{fill:#292d34;stroke:#444a55}.window{fill:#22262c;stroke:#9aa3af}.window-bar{stroke:#5d6570}.error-ring{fill:#a3abb6}.error-mark{stroke:#20242a}.status{color:#8f97a3}.status span{background:#8f97a3}.error h1{color:#f1f3f6}.description{color:#a0a7b1}}@media(max-width:860px){.shell{padding:24px 18px}.error{grid-template-columns:1fr;gap:34px;width:min(100%,520px);min-height:0;padding:26px 26px 36px;border-radius:26px}.visual{min-height:230px}.visual svg{width:min(68%,190px)}.copy{text-align:center}.status{justify-content:center;margin-bottom:18px}.error h1{font-size:34px}.description{margin:15px auto 0;font-size:15px;line-height:1.75}}`;
 export {
+  EntryTicketRedeemer,
   worker_default as default,
   handleWorkerRequest
 };

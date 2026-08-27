@@ -29,14 +29,14 @@ test('preserves application headers while removing gateway and hop-by-hop data',
     Authorization: 'Bearer application-token',
     Connection: 'keep-alive, x-remove-me',
     'Content-Type': 'application/json',
-    Cookie: 'route_session=gateway-private; app_session=application-private; theme=dark',
+    Cookie: 'route_session=gateway-private; entry_session=entry-private; app_session=application-private; theme=dark',
     Origin: 'https://data.example.com',
     'X-Edge-App-Gateway-Origin': 'forged',
     'X-Vercel-Protection-Bypass': 'client-bypass',
     'X-Remove-Me': 'private',
     'X-Forwarded-For': 'forged'
   }), {
-    sessionCookieName: 'route_session',
+    sessionCookieNames: ['route_session', 'entry_session'],
     originHeaderName: 'x-edge-app-gateway-origin',
     originSecret: 'server-origin-secret',
     clientHost: 'data.example.com',
@@ -168,6 +168,7 @@ test('rewrites only redirects pointing at the configured upstream origin', () =>
 test('rejects unsafe post-login paths and the gateway namespace', () => {
   assert.equal(sanitizeNextPath('/guide?q=1'), '/guide?q=1');
   assert.equal(sanitizeNextPath('//evil.example'), '/');
+  assert.equal(sanitizeNextPath('/\\evil.example'), '/');
   assert.equal(sanitizeNextPath('https://evil.example'), '/');
   assert.equal(sanitizeNextPath('/_edge-gateway/login'), '/');
 });

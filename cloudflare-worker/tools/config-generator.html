@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Edge App Gateway 配置生成器</title>
+    <title>Edge App Gateway 配置工具</title>
     <style>
       :root {
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -35,6 +35,10 @@
 
       .page-header { margin-bottom: 22px; }
       .lede { max-width: 790px; }
+      .workspace-tabs { display: flex; gap: 6px; margin-bottom: 16px; padding: 5px; border: 1px solid #e4e7ec; border-radius: 12px; background: #eaecf0; }
+      .workspace-tabs button { flex: 1; padding: 11px 14px; color: #667085; background: transparent; }
+      .workspace-tabs button:hover { background: #f2f4f7; }
+      .workspace-tabs button[aria-selected="true"] { color: #175cd3; background: white; box-shadow: 0 1px 3px rgb(16 24 40 / 12%); }
       .wizard-nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
       .wizard-nav button { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px 14px; color: #667085; border: 1px solid #e4e7ec; background: #fff; text-align: left; }
       .wizard-nav button:hover:not(:disabled) { background: #f9fafb; }
@@ -59,6 +63,8 @@
       details.subpanel[open] > summary { margin-bottom: 16px; }
       .import-panel { margin-top: 20px; padding: 18px; border: 1px dashed #b2ccff; border-radius: 12px; background: #f8faff; }
       .import-panel h3 { margin-bottom: 5px; }
+      .verification-form { max-width: 720px; }
+      .verification-context { margin-bottom: 20px; }
 
       .app-workspace { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; align-items: start; }
       .project-sidebar { min-width: 0; padding: 12px; border: 1px solid #e4e7ec; border-radius: 12px; background: #f9fafb; }
@@ -137,24 +143,30 @@
   </head>
   <body>
     <header class="page-header">
-      <h1>Edge App Gateway 配置生成器</h1>
-      <p class="lede">集中维护 Worker 的多应用配置、Secrets 和 Custom Domains。页面完全离线，不发送网络请求，也不使用浏览器存储。</p>
+      <h1>Edge App Gateway 配置工具</h1>
+      <p class="lede">生成和验证 Worker 的多应用配置。页面完全离线，不发送网络请求，也不使用浏览器存储。</p>
     </header>
 
-    <nav class="wizard-nav" aria-label="配置步骤">
-      <button type="button" data-step-target="1" aria-current="step">
-        <span class="wizard-number">1</span><span class="wizard-label">Gateway</span>
-      </button>
-      <button type="button" data-step-target="2">
-        <span class="wizard-number">2</span><span class="wizard-label">应用</span>
-      </button>
-      <button type="button" data-step-target="3" disabled>
-        <span class="wizard-number">3</span><span class="wizard-label">部署结果</span>
-      </button>
+    <nav class="workspace-tabs" role="tablist" aria-label="配置工具">
+      <button id="workspace-tab-generator" type="button" role="tab" data-workspace-tab="generator" aria-controls="generator-workspace" aria-selected="true">配置生成器</button>
+      <button id="workspace-tab-verification" type="button" role="tab" data-workspace-tab="verification" aria-controls="verification-workspace" aria-selected="false" tabindex="-1">验证配置</button>
     </nav>
 
     <main>
-      <section class="wizard-step" id="wizard-step-1" data-step="1">
+      <div id="generator-workspace" role="tabpanel" data-workspace-panel="generator" aria-labelledby="workspace-tab-generator">
+        <nav class="wizard-nav" aria-label="配置步骤">
+          <button type="button" data-step-target="1" aria-current="step">
+            <span class="wizard-number">1</span><span class="wizard-label">Gateway</span>
+          </button>
+          <button type="button" data-step-target="2">
+            <span class="wizard-number">2</span><span class="wizard-label">应用</span>
+          </button>
+          <button type="button" data-step-target="3" disabled>
+            <span class="wizard-number">3</span><span class="wizard-label">部署结果</span>
+          </button>
+        </nav>
+
+        <section class="wizard-step" id="wizard-step-1" data-step="1">
         <div class="step-heading">
           <div>
             <h2>Gateway 与变量文件</h2>
@@ -206,40 +218,9 @@
         <div class="button-row end">
           <button type="button" data-step-target="2">下一步：配置应用</button>
         </div>
+        </section>
 
-        <details class="subpanel">
-          <summary>验证已有配置（排错工具）</summary>
-          <p>只在排查旧配置或 Edge 密码时使用，内容仅在当前页面内存处理。</p>
-          <div class="grid">
-            <div class="field">
-              <label for="verify-hostname">正在访问的完整域名</label>
-              <input id="verify-hostname" type="text" placeholder="app.preview.example.com" autocomplete="off">
-            </div>
-            <div class="field">
-              <label for="verify-base-domain">ROUTE_BASE_DOMAIN</label>
-              <input id="verify-base-domain" type="text" placeholder="preview.example.com" autocomplete="off">
-            </div>
-          </div>
-          <div class="field">
-            <label for="verify-projects">ROUTE_PROJECTS_JSON 的 Value</label>
-            <textarea id="verify-projects"></textarea>
-          </div>
-          <div class="grid">
-            <div class="field">
-              <label for="verify-password">本次输入的明文密码</label>
-              <input id="verify-password" type="password" maxlength="256" autocomplete="off">
-            </div>
-            <div class="field">
-              <label for="verify-secret">ROUTE_SESSION_SECRET</label>
-              <input id="verify-secret" type="password" autocomplete="off">
-            </div>
-          </div>
-          <button id="verify-button" type="button">检查映射和密码</button>
-          <p class="status" id="verify-status" role="status"></p>
-        </details>
-      </section>
-
-      <section class="wizard-step" id="wizard-step-2" data-step="2" hidden>
+        <section class="wizard-step" id="wizard-step-2" data-step="2" hidden>
         <div class="step-heading">
           <div>
             <h2>应用配置</h2>
@@ -264,9 +245,9 @@
           <p class="status" id="generate-status" role="status"></p>
           <button class="generate-button" id="generate-button" type="button">生成全部配置</button>
         </div>
-      </section>
+        </section>
 
-      <template id="project-template">
+        <template id="project-template">
         <article class="project-card" data-project data-active="false">
           <div class="project-header">
             <h3 data-role="project-title">应用</h3>
@@ -299,6 +280,29 @@
             </div>
             <input data-field="password-hash" type="hidden">
             <p class="status" data-role="password-status" role="status"></p>
+          </div>
+
+          <div class="field">
+            <label>是否必须从统一入口进入</label>
+            <select data-field="entry-access">
+              <option value="disabled">不限制进入方式</option>
+              <option value="required">必须从统一入口点击进入</option>
+            </select>
+          </div>
+          <div data-role="entry-fields" hidden>
+            <div class="grid">
+              <div class="field">
+                <label>统一入口 Alias</label>
+                <input data-field="entry-alias" type="text" placeholder="portal" autocomplete="off">
+                <small>必须引用本配置中的另一个应用；该入口必须启用 Gateway 密码登录。</small>
+              </div>
+              <div class="field">
+                <label>入口通行有效期（秒）</label>
+                <input data-field="entry-ttl" type="number" min="300" max="86400" value="1800">
+                <small>进入目标 Demo 后的通行时间，默认 30 分钟。</small>
+              </div>
+            </div>
+            <div class="security-note">启用后，直接访问此应用的 Gateway 域名只会得到无标识 404；统一入口通过短时签名票据授权，不依赖可伪造的 Referer。</div>
           </div>
 
           <details class="subpanel">
@@ -353,9 +357,9 @@
             </div>
           </details>
         </article>
-      </template>
+        </template>
 
-      <section class="wizard-step result" id="deployment-result" data-step="3" hidden>
+        <section class="wizard-step result" id="deployment-result" data-step="3" hidden>
         <div class="step-heading">
           <div>
             <h2>部署结果</h2>
@@ -366,6 +370,7 @@
 
         <div class="result-tabs" role="tablist" aria-label="结果分类">
           <button type="button" role="tab" data-result-tab="deployment" aria-selected="true">部署</button>
+          <button type="button" role="tab" data-result-tab="entry" aria-selected="false">统一入口</button>
           <button type="button" role="tab" data-result-tab="waf" aria-selected="false">Vercel WAF</button>
           <button type="button" role="tab" data-result-tab="raw" aria-selected="false">原始配置</button>
         </div>
@@ -430,7 +435,7 @@
               <span class="flow-number">5</span>
               <div class="flow-content">
                 <h3>执行健康检查</h3>
-                <p>逐个确认 Custom Domain 已运行新版本。</p>
+                <p>确认统一入口及未受入口限制的域名已运行新版本；受限 Demo 的健康接口会隐匿为 404。</p>
                 <textarea class="output" id="verify-command-output" readonly></textarea>
                 <button class="secondary" data-copy="verify-command-output" data-default-label="复制健康检查" type="button">复制健康检查</button>
               </div>
@@ -456,6 +461,14 @@
           </details>
         </div>
 
+        <div class="result-panel" data-result-panel="entry" hidden>
+          <div class="callout">统一入口项目仍保存每个 Demo 的 Gateway HTTPS 地址。入口页面把目标域名和路径转换为下列 <code>/_edge-gateway/launch</code> 链接；Gateway 校验同源用户导航并签发单次兑换票据，项目本身不保存 Gateway Secret。</div>
+          <label for="entry-launch-output" style="margin-top: 16px">已配置的统一入口跳转链接</label>
+          <textarea class="output" id="entry-launch-output" readonly></textarea>
+          <button class="secondary" data-copy="entry-launch-output" data-default-label="复制入口链接" type="button">复制入口链接</button>
+          <p id="entry-empty" hidden>当前没有应用要求从统一入口进入。</p>
+        </div>
+
         <div class="result-panel" data-result-panel="waf" hidden>
           <div class="callout">每个 Vercel 项目使用独立 Secret。WAF 先设为 Log，确认 Worker Header 正确后再切换 Deny。</div>
           <div id="waf-secrets-output"></div>
@@ -469,6 +482,33 @@
           <textarea class="output" id="route-json-output" readonly></textarea>
           <button class="secondary" data-copy="route-json-output" data-default-label="复制路由 JSON" type="button">复制路由 JSON</button>
         </div>
+        </section>
+      </div>
+
+      <section class="wizard-step" id="verification-workspace" role="tabpanel" data-workspace-panel="verification" aria-labelledby="workspace-tab-verification" hidden>
+        <div class="step-heading">
+          <div>
+            <h2>验证配置</h2>
+            <p>使用最近一次导入或生成的完整配置检查域名映射和 Gateway 访问密码。</p>
+          </div>
+        </div>
+
+        <div class="callout verification-context" id="verification-context">尚未载入可验证的配置，请先在“配置生成器”中导入变量文件或生成完整配置。</div>
+        <form class="verification-form" id="verification-form">
+          <div class="field">
+            <label for="verify-hostname">要访问的域名</label>
+            <input id="verify-hostname" type="text" placeholder="app.preview.example.com" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="verify-password">Gateway 访问密码（可选）</label>
+            <input id="verify-password" type="password" maxlength="256" autocomplete="off">
+            <small>未启用 Gateway 密码登录的应用可留空；密码只在当前页面内存中参与本地校验。</small>
+          </div>
+          <div class="button-row">
+            <button id="verify-button" type="submit">验证</button>
+          </div>
+          <p class="status" id="verify-status" role="status" aria-live="polite"></p>
+        </form>
       </section>
     </main>
 

@@ -6,6 +6,7 @@
 用户自定义域名
         ↓
 Cloudflare Worker 按 Host 解析 alias
+        ├─ entryAccess=required：验证入口与目标绑定的通行 Session
         ├─ edgeAccess=required：验证 alias 绑定的 Gateway Session
         └─ edgeAccess=disabled：跳过验证
         ↓
@@ -22,7 +23,24 @@ Cloudflare Worker 按 Host 解析 alias
 状态、Header、Cookie 和响应流返回同一自定义域名
 ```
 
-`edgeAccess`、`originProtection`、`proxyProfile` 和上游 Application Access 没有隐式耦合。特别是 `edgeAccess=disabled` 只跳过 Gateway 登录，不会把浏览器重定向到 Vercel，也不会禁用源站密钥。
+`entryAccess`、`edgeAccess`、`originProtection`、`proxyProfile` 和上游 Application Access 没有隐式耦合。特别是 `edgeAccess=disabled` 只跳过 Gateway 登录，不会跳过 required 统一入口通行、把浏览器重定向到 Vercel 或禁用源站密钥。
+
+## 统一入口信任链
+
+```text
+已通过 Edge Access 的入口 Host
+        ↓ 用户点击 GET /_edge-gateway/launch?target=<目标 Host>&next=<路径>
+验证同源用户导航 Fetch Metadata、入口 route_session 和入口→目标关系
+        ↓ 303，携带 30 秒随机、不透明 HMAC 票据
+目标 Host /_edge-gateway/entry
+        ↓ 验证票据用途、入口 Alias、目标 Alias、目标路径、签名和过期时间
+ENTRY_TICKET_REDEEMER Durable Object 原子消费票据
+        设置目标 Host-only entry_session
+        ↓ 303 到目标业务路径
+Demo 普通请求验证 entry_session；缺失或无效时返回无标识 404
+```
+
+入口和目标必须属于同一份路由配置。票据及通行 Session 都由 `ROUTE_SESSION_SECRET` 签名，但用途上下文不同，不能互换；票据同时绑定入口、目标和规范化路径。Token 对外只显示版本、过期时间、随机 nonce 和签名，不显示可解码的 Alias、路径或用途。系统不把 `Referer` 单独当作现代浏览器授权，也不向统一入口项目提供 Secret。每张 handoff ticket 映射到独立 Durable Object，首次成功兑换后即被原子标记，30 秒有效期内的后续重放也会被隐匿拒绝。
 
 ## Origin 转换边界
 
@@ -38,7 +56,7 @@ Worker 不解析或重新序列化业务请求体；写方法的 `request.body` 
 
 Gateway Session 只证明访问者通过该 alias 的边缘验证。上游应用 Session 仍通过普通 Cookie/Authorization 工作：
 
-- 请求中只删除名为 `route_session` 的 Gateway Cookie。
+- 请求中删除名为 `route_session` 和 `entry_session` 的 Gateway Cookie。
 - 上游 Cookie 与 Authorization 保留。
 - 上游多个 Set-Cookie 全部保留。
 - 显式 Vercel Domain 按 `cookieDomainPolicy` 删除或重写；Host-only Cookie 原样传递。
@@ -50,6 +68,8 @@ Gateway Session 只证明访问者通过该 alias 的边缘验证。上游应用
 | --- | --- |
 | 路由方法未允许 | Gateway 405 JSON，并带准确 `Allow` |
 | Edge Access required 且无会话 | 文档导航进入 Gateway 登录；API 返回 Gateway 401 JSON |
+| Entry Access required 且无有效通行 | 中性页面或空正文 404，不发起上游请求 |
+| 入口签票目标无效、入口未认证或票据无效 | 与直访相同的隐匿 404 |
 | Secret Binding 缺失或配置无效 | Gateway 安全错误，不发起上游请求 |
 | 改写策略收到跨站/opaque Origin | 403 `EDGE_ORIGIN_NOT_ALLOWED`，不发起上游请求 |
 | 上游正常返回 4xx/5xx | 状态、类型、Header、正文原样返回 |
@@ -58,7 +78,7 @@ Gateway Session 只证明访问者通过该 alias 的边缘验证。上游应用
 
 ## 入口和源站边界
 
-生产 Wrangler 禁用 `workers.dev` 和 Preview URL。Vercel Production URL 必须通过 WAF 拒绝不带正确项目密钥的请求；Preview/Deployment URL 由 Vercel Standard Protection 或 Authentication 保护。完成外部配置并移除 Vercel 自定义域名后，Cloudflare Custom Domain 才是唯一正常入口。
+生产 Wrangler 禁用 `workers.dev` 和 Preview URL。受 `entryAccess` 保护的 Cloudflare Custom Domain 只能从指定统一入口获得通行；Vercel Production URL 则必须通过 WAF 拒绝不带正确项目密钥的请求，Preview/Deployment URL 由 Vercel Standard Protection 或 Authentication 保护。两类限制覆盖不同入口，不能互相替代。完成外部配置并移除 Vercel 自定义域名后，Cloudflare Custom Domain 才是唯一正常业务入口。
 
 本仓库实现 HTTP fetch 代理，不实现 WebSocket Upgrade。上游仍限定为 `https://*.vercel.app`，上游地址只能来自服务端路由配置。
 
@@ -70,4 +90,4 @@ Gateway Session 只证明访问者通过该 alias 的边缘验证。上游应用
 npm run dashboard:build
 ```
 
-健康接口 `/_edge-gateway/health` 返回构建编号，用于确认 Custom Domain 命中的 Production 版本。
+健康接口 `/_edge-gateway/health` 在统一入口及未受入口限制的域名返回构建编号，用于确认命中的 Production 版本。受 `entryAccess` 限制的 Demo 始终将该接口隐匿为 404，避免暴露 Gateway 类型和版本。

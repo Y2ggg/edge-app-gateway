@@ -219,6 +219,10 @@ function validateVariablesFile(value) {
   }
 
   const expectedDomains = [...projects.keys()].map(alias => `${alias}.${baseDomain}`).sort();
+  const healthDomains = [...projects]
+    .filter(([, project]) => project.entryAccess.mode !== 'required')
+    .map(([alias]) => `${alias}.${baseDomain}`)
+    .sort();
   const customDomains = value.worker?.customDomains;
   if (
     !Array.isArray(customDomains) ||
@@ -236,6 +240,7 @@ function validateVariablesFile(value) {
     vars,
     secrets,
     customDomains: expectedDomains,
+    healthDomains,
     projectCount: projects.size,
     secretNames: Object.keys(secrets),
     secretValues: Object.values(secrets).filter(value => typeof value === 'string' && value)
@@ -393,8 +398,8 @@ function printDeploymentResult(config, wranglerOutput) {
   console.log(`Version ID：${versionId}`);
   console.log(`Custom Domains：${config.customDomains.join(', ')}`);
   console.log(`Secret Bindings：${config.secretNames.join(', ')}`);
-  console.log('健康检查命令：');
-  for (const domain of config.customDomains) {
+  console.log('公开健康检查命令：');
+  for (const domain of config.healthDomains) {
     console.log(`curl -fsS ${shellQuote(`https://${domain}/_edge-gateway/health`)}`);
   }
 }

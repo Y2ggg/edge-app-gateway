@@ -14,6 +14,7 @@ function fullstackProject(overrides = {}) {
     proxyProfile: 'fullstack',
     requestOriginPolicy: 'rewrite-to-upstream',
     edgeAccess: { mode: 'disabled' },
+    entryAccess: { mode: 'disabled' },
     originProtection: {
       mode: 'required',
       headerName: 'x-edge-app-gateway-origin',
@@ -39,6 +40,7 @@ test('parses the explicit route protocol and normalizes method order', () => {
     proxyProfile: 'fullstack',
     requestOriginPolicy: 'rewrite-to-upstream',
     edgeAccess: { mode: 'disabled' },
+    entryAccess: { mode: 'disabled' },
     originProtection: {
       mode: 'required',
       headerName: 'x-edge-app-gateway-origin',
@@ -68,6 +70,43 @@ test('requires a password hash only when Edge Access is required', () => {
     })
   }));
   assert.equal(required.get('project-a7f3').edgeAccess.passwordHash, 'hmac-sha256$hash');
+});
+
+test('validates entry-only access relationships and defaults', () => {
+  const projects = parseRouteProjects(JSON.stringify({
+    'portal-a7f3': fullstackProject({
+      target: 'https://portal.vercel.app',
+      edgeAccess: { mode: 'required', passwordHash: 'hmac-sha256$portal' }
+    }),
+    'project-a7f3': fullstackProject({
+      entryAccess: { mode: 'required', entryAlias: 'portal-a7f3', ttlSeconds: 900 }
+    })
+  }));
+
+  assert.deepEqual(projects.get('portal-a7f3').entryAccess, { mode: 'disabled' });
+  assert.deepEqual(projects.get('project-a7f3').entryAccess, {
+    mode: 'required',
+    entryAlias: 'portal-a7f3',
+    ttlSeconds: 900
+  });
+
+  for (const projectOverrides of [
+    { entryAccess: { mode: 'required', entryAlias: 'missing-a7f3' } },
+    { entryAccess: { mode: 'required', entryAlias: 'project-a7f3' } },
+    { entryAccess: { mode: 'required', entryAlias: 'portal-a7f3', ttlSeconds: 60 } },
+    {
+      deliveryMode: 'redirect',
+      requestOriginPolicy: 'preserve',
+      originProtection: { mode: 'disabled' },
+      allowedMethods: ['GET', 'HEAD'],
+      entryAccess: { mode: 'required', entryAlias: 'portal-a7f3' }
+    }
+  ]) {
+    assert.throws(() => parseRouteProjects(JSON.stringify({
+      'portal-a7f3': fullstackProject({ target: 'https://portal.vercel.app' }),
+      'project-a7f3': fullstackProject(projectOverrides)
+    })), RouteConfigurationError);
+  }
 });
 
 test('defaults to preserving request origins and validates explicit rewrite policy', () => {

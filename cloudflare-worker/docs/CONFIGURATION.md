@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `ROUTE_PROJECTS_JSON` | 是 | 1–200 个应用组成的新协议 JSON 映射，生产环境建议存为 Secret |
 | `ROUTE_BASE_DOMAIN` | 多应用必需 | 仅域名，例如 `apps.example.com`，不含协议、端口、路径或通配符 |
-| `ROUTE_SESSION_SECRET` | Edge Access required 时必需 | 至少 32 个字符，用于密码 HMAC 和 alias 绑定的 Session 签名 |
+| `ROUTE_SESSION_SECRET` | 存在 Edge Access required 路由时必需 | 至少 32 个字符，用于密码 HMAC、alias 绑定的 Session 以及统一入口票据签名 |
 | `ROUTE_SESSION_TTL_SECONDS` | 否 | 300–604800，默认 28800 秒 |
 | 路由中的 `secretBinding` | Origin Protection required 时必需 | Binding 名进入 JSON，Secret 值单独保存在 Cloudflare |
 | `EDGE_LOGIN_RATE_LIMITER` | 建议 | Wrangler 已配置为每 IP+alias 每分钟最多 5 次登录提交；另有 isolate 内失败计数兜底 |
@@ -33,7 +33,7 @@
   },
   "secrets": {
     "ROUTE_PROJECTS_JSON": "<完整 JSON 字符串>",
-    "ROUTE_SESSION_SECRET": "<仅 Edge Access required 时存在>",
+    "ROUTE_SESSION_SECRET": "<存在 Edge Access required 路由时存在>",
     "ORIGIN_SECRET_PORTAL": "<项目独立 Secret>"
   }
 }
@@ -51,6 +51,9 @@
     "proxyProfile": "fullstack",
     "requestOriginPolicy": "rewrite-to-upstream",
     "edgeAccess": {
+      "mode": "disabled"
+    },
+    "entryAccess": {
       "mode": "disabled"
     },
     "originProtection": {
@@ -81,6 +84,7 @@
 - `proxyProfile` 为 `static` 或 `fullstack`。static 只能允许 GET、HEAD、OPTIONS；fullstack 可使用全部受支持方法。
 - `requestOriginPolicy` 可省略，默认 `preserve`。`rewrite-to-upstream` 只改写原本与用户自定义域名同源的 Origin/Referer，适用于按 Vercel Host 校验同源的上游 Access Gate。redirect 模式不能使用改写策略。
 - `edgeAccess.mode` 为 `disabled` 或 `required`。required 必须有 `edgeAccess.passwordHash`；disabled 时该字段不读取，也不需要 `ROUTE_SESSION_SECRET`。
+- `entryAccess` 可省略，默认 `{ "mode": "disabled" }`。`required` 必须提供另一个已配置应用的 `entryAlias`，以及可选的 `ttlSeconds`（300–86400，默认 1800）。目标与入口都必须使用 proxy；入口必须启用 Edge Access，且不能再依赖其他入口。
 - `originProtection.mode` 为 `disabled` 或 `required`。required 必须有安全的自定义 `x-` Header 名和大写 Binding 名 `secretBinding`；`x-vercel-protection-bypass` 被明确禁止。
 - `deliveryMode=redirect` 不能与 required 源站保护共存，而且只能允许 GET/HEAD。
 - `allowedMethods` 必须是非空、无重复的受支持方法数组。Worker 规范化 `Allow` 顺序。
@@ -96,11 +100,13 @@
 - `GET|POST /_edge-gateway/login`
 - `POST /_edge-gateway/logout`
 - `GET /_edge-gateway/session`
-- `GET /_edge-gateway/health`
+- `GET /_edge-gateway/health`（受统一入口限制的 Demo 隐匿该接口）
+- `GET /_edge-gateway/launch`（统一入口校验同源用户导航并签发 30 秒票据）
+- `GET /_edge-gateway/entry`（目标应用验票并建立通行会话）
 
 登录 POST 必须提供同源 `Origin`，或在 Origin 缺失时提供同源 `Referer`。失败、未知 alias 和错误密码使用相同页面和日志消息。失败尝试按客户端 IP+alias 限制；生产部署同时使用 `EDGE_LOGIN_RATE_LIMITER` Binding，内存计数仅作为补充。
 
-`route_session` 为无 Domain 的 Host-only Cookie，设置 `Path=/; HttpOnly; Secure; SameSite=Lax`。alias 写入签名 Token，因此其他 alias 的 Token 无效。当前路由按独立主机承载 alias，`Path=/` 正是该 alias 主机可用的最窄业务路径。转发前只删除这个 Gateway Cookie，其他 Cookie 保留。
+`route_session` 为无 Domain 的 Host-only Cookie，设置 `Path=/; HttpOnly; Secure; SameSite=Lax`。alias 写入签名 Token，因此其他 alias 的 Token 无效。当前路由按独立主机承载 alias，`Path=/` 正是该 alias 主机可用的最窄业务路径。转发前删除 Gateway 自己的 `route_session` 和 `entry_session`，其他 Cookie 保留。
 
 使用当前会话密钥生成密码散列：
 
@@ -109,6 +115,61 @@ npm run password:hash -- "访问密码" "ROUTE_SESSION_SECRET"
 ```
 
 更换 `ROUTE_SESSION_SECRET` 会使所有现有 Session 和密码散列失效；required 路由需要重新生成散列。
+
+## 统一入口访问控制
+
+统一入口项目必须作为普通 proxy 应用接入 Gateway，并启用 `edgeAccess.mode=required`。受保护 Demo 的示例：
+
+```json
+{
+  "portal": {
+    "target": "https://portal-app.vercel.app",
+    "deliveryMode": "proxy",
+    "proxyProfile": "fullstack",
+    "requestOriginPolicy": "rewrite-to-upstream",
+    "edgeAccess": { "mode": "required", "passwordHash": "<HMAC 散列>" },
+    "entryAccess": { "mode": "disabled" },
+    "originProtection": {
+      "mode": "required",
+      "headerName": "x-edge-app-gateway-origin",
+      "secretBinding": "ORIGIN_SECRET_PORTAL"
+    },
+    "allowedMethods": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    "cachePolicy": "no-store",
+    "cookieDomainPolicy": "strip"
+  },
+  "demo-app": {
+    "target": "https://demo-app.vercel.app",
+    "deliveryMode": "proxy",
+    "proxyProfile": "fullstack",
+    "requestOriginPolicy": "rewrite-to-upstream",
+    "edgeAccess": { "mode": "disabled" },
+    "entryAccess": { "mode": "required", "entryAlias": "portal", "ttlSeconds": 1800 },
+    "originProtection": {
+      "mode": "required",
+      "headerName": "x-edge-app-gateway-origin",
+      "secretBinding": "ORIGIN_SECRET_DEMO_APP"
+    },
+    "allowedMethods": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    "cachePolicy": "no-store",
+    "cookieDomainPolicy": "strip"
+  }
+}
+```
+
+入口页面链接到当前入口 Host 的相对地址：
+
+```text
+/_edge-gateway/launch?target=demo-app.apps.example.com&next=%2F
+```
+
+Gateway 先验证入口 Host 的 `route_session` 和配置中的入口→目标关系。对提供 Fetch Metadata 的现代浏览器，launch 还必须是 `same-origin`、`navigate`、`document` 且带有真实用户激活标记 `Sec-Fetch-User: ?1`；地址栏直开、F12 fetch、无用户手势的脚本导航和跨站触发均被隐匿拒绝。对完全不提供 Fetch Metadata 的旧客户端，仅兼容同源 Referer；Referer 不作为现代浏览器的授权替代品。
+
+校验通过后，Gateway 签发 30 秒的随机紧凑票据。票据正文不包含可解码的入口 Alias、目标 Alias、路径或用途；这些上下文与随机 nonce、过期时间共同参与 HMAC，因而票据不能跨入口、跨目标、跨路径或跨用途使用。目标 `/_edge-gateway/entry` 验票后通过 `ENTRY_TICKET_REDEEMER` Durable Object 原子消费票据；同一票据再次使用会得到隐匿 404。首次兑换会设置无 Domain 的 Host-only `entry_session`，有效期由目标的 `ttlSeconds` 决定。
+
+目标普通请求缺少、过期或 Alias 不匹配的通行 Cookie时，不返回 Gateway JSON 或权限提示：文档导航得到中性的“页面无法打开”404，API、静态资源和 favicon 得到空正文 404。错误票据、伪造 `Referer`、未授权的登录/会话接口和受限 Demo 的健康接口使用同样的隐匿响应。响应强制 `private, no-store`、`no-referrer`、禁止索引，并使用仅允许内联页面样式、拒绝其他资源和嵌入的 CSP。
+
+`entryAccess` 不替代两类已有控制：目标自身若还启用 Edge Access，访客通过统一入口后仍需完成目标密码验证；Vercel Production URL 是否能绕过 Gateway，仍由该项目的 Vercel WAF Origin Secret 规则决定。
 
 ## 请求与响应代理
 

@@ -360,6 +360,6 @@ test('provides actionable dependency, login, deployment and health output', () =
   assert.match(deployScriptSource, /npx wrangler login/);
   assert.match(deployScriptSource, /Worker 名称：/);
   assert.match(deployScriptSource, /Version ID：/);
-  assert.match(deployScriptSource, /健康检查命令：/);
+  assert.match(deployScriptSource, /公开健康检查命令：/);
   assert.match(deployScriptSource, /redactSecrets/);
 });

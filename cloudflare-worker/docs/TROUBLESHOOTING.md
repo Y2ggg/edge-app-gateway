@@ -6,7 +6,7 @@
 https://项目域名/_edge-gateway/health
 ```
 
-预期 build 为 `2026-08-21-gateway-v5`。不符时先确认最新 Dashboard 包或 Wrangler Deployment 已进入 Production，Custom Domain 绑定到同一 Worker。
+在统一入口域名上预期 build 为 `2026-08-27-gateway-v9`。不符时先确认最新 Dashboard 包或 Wrangler Deployment 已进入 Production，Custom Domain 绑定到同一 Worker。受统一入口限制的 Demo 会将健康接口隐匿为 404，不应在这些域名上读取 build。
 
 ## Gateway 配置错误
 
@@ -18,6 +18,7 @@ https://项目域名/_edge-gateway/health
 - 上游按 Host 校验 Origin 时，是否设置 `requestOriginPolicy: rewrite-to-upstream`。
 - redirect 是否错误搭配 required 源站保护或写方法。
 - 多应用的 `ROUTE_BASE_DOMAIN`、Custom Domain 前缀和 alias 是否一致。
+- `entryAccess=required` 的入口 Alias 是否存在，入口与目标是否都为 proxy，入口是否启用了 Edge Access 且没有依赖另一入口。
 
 日志只应出现错误类别，不能打印 JSON、Binding 名、密码、Hash、Session 或 Secret 值。
 
@@ -29,7 +30,7 @@ https://项目域名/_edge-gateway/health
 | 正确密码仍失败 | 散列和线上验证必须使用同一个 `ROUTE_SESSION_SECRET` |
 | 429 | 同一 IP+alias 失败次数过多，等待 Retry-After；同时检查 Rate Limiter 配置 |
 | 登录后仍返回 401 | 浏览器是否接受 `Secure; HttpOnly; SameSite=Lax; Path=/` 的 `route_session`，Host 是否变化 |
-| 上游看到了 `route_session` | 确认运行 build v4，并检查是否是上游自己设置了同名 Cookie |
+| 上游看到了 `route_session` 或 `entry_session` | 确认运行最新 build，并检查是否是上游自己设置了同名 Cookie |
 
 未知 alias、错误密码和安全校验失败对浏览器显示相同消息，日志也不会输出具体原因。
 
@@ -41,10 +42,24 @@ https://项目域名/_edge-gateway/health
 
 应用登录循环时检查 Network：
 
-- 请求 Cookie 中应用 Session 是否存在；Gateway 只应删除 `route_session`。
+- 请求 Cookie 中应用 Session 是否存在；Gateway 只应删除 `route_session` 和 `entry_session`。
 - 上游是否返回多个 Set-Cookie，是否都到达浏览器。
 - 上游显式 `Domain=*.vercel.app` 时，按需将 `cookieDomainPolicy` 设为 `strip` 或 `rewrite`。
 - 同上游 Location 应改写为当前自定义域名；跳往外部身份提供商的 Location 会保留。
+
+## 统一入口问题
+
+| 现象 | 检查 |
+| --- | --- |
+| 直接访问 Demo 显示“页面无法打开”404 | `entryAccess=required` 的预期行为，应从已登录的统一入口 Card 进入 |
+| 从入口点击也返回“页面无法打开”404 | 入口是否持有当前 Host 的 `route_session`；Card 是否使用同源相对 GET launch；浏览器是否发送 `same-origin`/`navigate`/`document`/`Sec-Fetch-User: ?1` |
+| launch 或 entry 返回 503 | `ROUTE_SESSION_SECRET` 和 `ROUTE_BASE_DOMAIN` 是否有效；`ENTRY_TICKET_REDEEMER` Durable Object Binding 与 migration 是否随最新 `wrangler.jsonc` 部署 |
+| 目标验票返回 404 | ticket 是否已超过 30 秒、已兑换过、目标路径是否被改变，或入口与目标是否来自同一份最新路由配置 |
+| 进入后一段时间又返回 404 | `entry_session` 已过期；返回统一入口重新点击，或检查目标 `entryAccess.ttlSeconds` |
+| 伪造 Referer 仍返回 404 | 正常；Referer 不参与授权，只有签名票据和 Host-only Session 有效 |
+| Vercel Production URL 仍能直连 | 检查 Vercel WAF Origin Secret 规则；这不是 `entryAccess` 能覆盖的流量 |
+
+入口 Cookie 与目标 Cookie 都是 Host-only，不能期望浏览器把入口的 `route_session` 直接发送给 Demo。跨 Host 授权必须经过 launch → entry 的 303 跳转链。Gateway Cookie 不会转发给上游应用。
 
 ## POST、API 和流式问题
 

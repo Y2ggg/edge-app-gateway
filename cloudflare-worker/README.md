@@ -2,9 +2,10 @@
 
 本目录是 Edge App Gateway 的 Cloudflare Worker 部署组件。它为 Vercel 应用提供零侵入全栈入口：浏览器始终停留在自定义域名；Worker 可选执行边缘登录、代理完整 HTTP 请求、为每个上游注入独立源站密钥，并以流式正文返回响应。上游应用自己的 Access Gate、登录和 Cookie 不属于 Gateway 配置，也不会被 Gateway 删除或替代。
 
-四项职责彼此独立：
+五项职责边界清晰：
 
 - `edgeAccess`：是否由 Gateway 验证访问者；`disabled` 仍然走 Worker 代理。
+- `entryAccess`：是否只接受指定统一入口签发的短时通行；直接访问受限 Demo 返回无标识 404。
 - `originProtection`：是否注入 Vercel WAF 校验的项目独立密钥。
 - `proxyProfile`：声明静态或全栈代理能力。
 - Application Access：完全由上游应用管理，不写入 Gateway 路由表。
@@ -16,10 +17,11 @@
 - 可按路由将可信同源浏览器请求的 Origin/Referer 改写为上游 Origin，使按 Host 校验同源的上游 Access Gate 正常登录和退出；跨站 Origin 在边缘拒绝。
 - 请求体与响应体均使用 Web Streams 直接透传；Worker 不解析业务 JSON、NDJSON 或表单正文。
 - 保留 Authorization、应用 Cookie、状态码、Content-Type、Location、缓存头及多个 Set-Cookie。
-- 删除 hop-by-hop Header、客户端伪造的源站保护 Header 和 Gateway 自己的 `route_session`。
+- 删除 hop-by-hop Header、客户端伪造的源站保护 Header，以及 Gateway 自己的 `route_session`、`entry_session`。
 - 仅上游连接失败的浏览器文档导航显示不可用页面；业务 4xx/5xx 原样返回。
 - `assets-only` 只允许无认证静态资源缓存，API、NDJSON、SSE、登录和会话一律 `no-store`。
 - 生产 Wrangler 配置关闭 `workers.dev` 和 Preview URL。
+- 统一入口 GET launch 只接受已登录入口发起的同源用户导航；30 秒 handoff ticket 绑定目标路径，并由 Durable Object 原子限制为单次兑换。
 
 ## 目录
 

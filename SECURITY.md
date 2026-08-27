@@ -24,6 +24,8 @@ Edge App Gateway 位于公开入口与上游应用之间。认证绕过、跨应
 
 Worker 注入 Origin Secret 不会自动阻止 Vercel 源站直连。需要在每个 Vercel 项目中配置 WAF，拒绝缺失或错误 Secret 的请求；否则 Gateway 的 Edge Access 和其他入口控制可以通过 Production URL 绕过。
 
+`entryAccess` 只限制 Demo 的 Gateway Custom Domain：统一入口必须先通过 Edge Access；Worker 的 GET launch 同时验证入口会话、配置关系，以及浏览器的同源用户导航 Fetch Metadata，再签发绑定入口 Alias、目标 Alias、目标路径和用途的单次兑换票据。不要用 `Referer`、查询参数中的固定共享值或统一入口前端持有的 Secret 替代签名流程。Vercel Production URL 仍需上述 WAF 保护。
+
 部署方还应：
 
 - 保持 Cloudflare `workers.dev` 和 Preview URL 关闭；

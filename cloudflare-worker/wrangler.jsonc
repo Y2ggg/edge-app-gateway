@@ -15,6 +15,20 @@
       }
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ENTRY_TICKET_REDEEMER",
+        "class_name": "EntryTicketRedeemer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["EntryTicketRedeemer"]
+    }
+  ],
   "observability": {
     "enabled": true
   }

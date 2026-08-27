@@ -13,8 +13,9 @@ const generatorScript = await readFile(
 
 test('keeps the configuration generator offline', () => {
   assert.match(generatorHtml, /id="verify-hostname"/);
-  assert.match(generatorHtml, /id="verify-projects"/);
-  assert.match(generatorHtml, /id="verify-secret"/);
+  assert.doesNotMatch(generatorHtml, /id="verify-base-domain"/);
+  assert.doesNotMatch(generatorHtml, /id="verify-projects"/);
+  assert.doesNotMatch(generatorHtml, /id="verify-secret"/);
   assert.match(generatorScript, /async function verifyPassword/);
   assert.match(generatorScript, /crypto\.subtle\.sign/);
   assert.doesNotMatch(generatorHtml + generatorScript, /localStorage|sessionStorage|indexedDB/);
@@ -30,6 +31,23 @@ test('builds multiple applications with per-project secrets and domains', () => 
   assert.match(generatorScript, /ORIGIN_SECRET_/);
   assert.match(generatorScript, /customDomains = Object\.keys\(projects\)/);
   assert.match(generatorScript, /bindingOwners\.has/);
+});
+
+test('configures signed unified-entry access and produces launch links', () => {
+  assert.match(generatorHtml, /data-field="entry-access"/);
+  assert.match(generatorHtml, /data-field="entry-alias"/);
+  assert.match(generatorHtml, /data-field="entry-ttl"/);
+  assert.match(generatorHtml, /不依赖可伪造的 Referer/);
+  assert.match(generatorHtml, /data-result-tab="entry"/);
+  assert.match(generatorHtml, /id="entry-launch-output"/);
+  assert.match(generatorScript, /function syncProjectEntryFields/);
+  assert.match(generatorScript, /function validateEntryAccessRelationships/);
+  assert.match(generatorScript, /entryAccess,/);
+  assert.match(generatorScript, /\/_edge-gateway\/launch/);
+  assert.match(generatorScript, /launchUrl\.searchParams\.set\('target'/);
+  assert.match(generatorScript, /统一入口.*必须启用 Gateway 密码登录/);
+  assert.match(generatorScript, /project\.entryAccess\.mode !== 'required'/);
+  assert.match(generatorHtml, /受限 Demo 的健康接口会隐匿为 404/);
 });
 
 test('imports and exports a versioned variables file without plaintext passwords', () => {
@@ -69,7 +87,17 @@ test('preserves imported hashes and never generates silently during export or im
   assert.doesNotMatch(importSource, /generateAndRender/);
 });
 
-test('keeps the workflow compact with steps, master-detail editing and result tabs', () => {
+test('keeps generation and verification as peer tabs', () => {
+  assert.match(generatorHtml, /role="tab"[^>]*data-workspace-tab="generator"/);
+  assert.match(generatorHtml, /role="tab"[^>]*data-workspace-tab="verification"/);
+  assert.match(generatorHtml, /id="generator-workspace"[^>]*data-workspace-panel="generator"/);
+  assert.match(generatorHtml, /id="verification-workspace"[^>]*data-workspace-panel="verification"/);
+  assert.match(generatorScript, /function showWorkspaceTab/);
+  assert.match(generatorScript, /ArrowLeft/);
+  assert.match(generatorScript, /ArrowRight/);
+});
+
+test('keeps the generator workflow compact with steps, master-detail editing and result tabs', () => {
   assert.match(generatorHtml, /id="wizard-step-1"/);
   assert.match(generatorHtml, /id="wizard-step-2"/);
   assert.match(generatorHtml, /id="deployment-result"[^>]*data-step="3"[^>]*hidden/);
@@ -80,6 +108,21 @@ test('keeps the workflow compact with steps, master-detail editing and result ta
   assert.match(generatorScript, /function selectProject/);
   assert.match(generatorScript, /card\.dataset\.active/);
   assert.match(generatorScript, /function activateResultTab/);
+});
+
+test('verifies a hostname and optional password from the loaded configuration', () => {
+  const verificationPanel = generatorHtml.slice(generatorHtml.indexOf('id="verification-workspace"'));
+  assert.match(verificationPanel, /id="verify-hostname"/);
+  assert.match(verificationPanel, /id="verify-password"/);
+  assert.match(verificationPanel, /Gateway 访问密码（可选）/);
+  assert.doesNotMatch(verificationPanel, /ROUTE_BASE_DOMAIN|ROUTE_PROJECTS_JSON|ROUTE_SESSION_SECRET/);
+  assert.match(generatorScript, /let verificationConfiguration = null/);
+  assert.match(generatorScript, /setVerificationConfiguration\(\{/);
+  assert.match(generatorScript, /const \{ baseDomain, projects, sessionSecret \} = verificationConfiguration/);
+  assert.match(generatorScript, /Edge Access 已禁用/);
+  assert.match(generatorScript, /请填写访问密码/);
+  assert.match(generatorScript, /密码与 passwordHash 不匹配/);
+  assert.match(generatorScript, /passwordInput\.value = ''/);
 });
 
 test('generates one repository-root deployment flow with synchronized filenames', () => {

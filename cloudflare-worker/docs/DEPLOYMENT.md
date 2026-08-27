@@ -20,11 +20,19 @@ npm run deploy:check
 ```json
 {
   "workers_dev": false,
-  "preview_urls": false
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ENTRY_TICKET_REDEEMER",
+        "class_name": "EntryTicketRedeemer"
+      }
+    ]
+  }
 }
 ```
 
-本地 `wrangler dev` 不需要开放生产 Preview URL。若团队确需远程开发 Preview，请另建不参与生产部署的开发配置，不能把生产开关改回 true。
+`ENTRY_TICKET_REDEEMER` 为每张 handoff ticket 提供原子单次兑换状态；对应 `v1` Durable Object migration 也必须保留。本地 `wrangler dev` 不需要开放生产 Preview URL。若团队确需远程开发 Preview，请另建不参与生产部署的开发配置，不能把生产开关改回 true。
 
 ## 2. 准备配置和密钥
 
@@ -50,6 +58,7 @@ npm run deploy:check
     "proxyProfile": "fullstack",
     "requestOriginPolicy": "rewrite-to-upstream",
     "edgeAccess": { "mode": "disabled" },
+    "entryAccess": { "mode": "disabled" },
     "originProtection": {
       "mode": "required",
       "headerName": "x-edge-app-gateway-origin",
@@ -83,11 +92,11 @@ npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.v
 npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json
 ```
 
-`npm --prefix` 会让部署脚本在 `cloudflare-worker/` 内运行，因此根目录变量文件参数使用 `../<文件名>`。部署脚本会从自身位置自动定位 Worker 和 Wrangler，校验文件版本、路由协议、Secret Binding、Alias、基础域名及全部 Custom Domains。Secret JSON 只写入 Wrangler 标准输入，不出现在命令行参数或脚本日志中。普通变量使用 `--var`，每个精确域名使用一个 `--domain`；Rate Limiter、`workers_dev=false` 和 `preview_urls=false` 继续由 `wrangler.jsonc` 管理。
+`npm --prefix` 会让部署脚本在 `cloudflare-worker/` 内运行，因此根目录变量文件参数使用 `../<文件名>`。部署脚本会从自身位置自动定位 Worker 和 Wrangler，校验文件版本、路由协议、Secret Binding、Alias、基础域名及全部 Custom Domains。Secret JSON 只写入 Wrangler 标准输入，不出现在命令行参数或脚本日志中。普通变量使用 `--var`，每个精确域名使用一个 `--domain`；Rate Limiter、Durable Object Binding/migration、`workers_dev=false` 和 `preview_urls=false` 继续由 `wrangler.jsonc` 管理。
 
-`--check` 完全在本地执行，不检查登录、不访问 Cloudflare。`--dry-run` 调用 Wrangler 构建但不会正式部署。正式部署成功后，脚本会输出 Worker 名称、Version ID、Custom Domains、Secret Binding 名称和逐域名健康检查命令；任何输出都会过滤已知 Secret 值。
+`--check` 完全在本地执行，不检查登录、不访问 Cloudflare。`--dry-run` 调用 Wrangler 构建但不会正式部署。正式部署成功后，脚本会输出 Worker 名称、Version ID、Custom Domains、Secret Binding 名称，以及统一入口和未受入口限制域名的健康检查命令；任何输出都会过滤已知 Secret 值。
 
-只有 disabled Edge Access 路由时可以省略 `ROUTE_SESSION_SECRET`。每个 `originProtection.secretBinding` 都必须在文件的 `secrets` 中存在，否则脚本拒绝部署。
+只有全部路由都关闭 Edge Access 且未使用统一入口限制时，才可以省略 `ROUTE_SESSION_SECRET`。每个 `originProtection.secretBinding` 都必须在文件的 `secrets` 中存在，否则脚本拒绝部署。
 
 Wrangler 的 `--secrets-file` 是增量写入：从变量文件移除项目后，旧的未引用 Secret 不会自动删除。确认已无路由使用后，再显式执行 `npx wrangler secret delete <NAME> --name <WORKER>`；部署时不要盲目批量清理远端 Secret。
 
@@ -97,7 +106,7 @@ Wrangler 的 `--secrets-file` 是增量写入：从变量文件移除项目后�
 https://portal.apps.example.com/_edge-gateway/health
 ```
 
-确认 build 为 `2026-08-21-gateway-v5`。
+确认 build 为 `2026-08-27-gateway-v9`。只在统一入口或未受入口限制的域名执行健康检查；受限 Demo 的健康接口预期为 404。
 
 ## 4. 配置 Vercel WAF 源站保护
 
@@ -146,6 +155,7 @@ curl -i https://portal.apps.example.com/
 预期前两项被 Vercel 拒绝，第三项经 Worker 到达上游应用或它自己的 Access Gate。随后验证：
 
 - Gateway Edge Access required/disabled 两类路由。
+- 统一入口 Card 的同源用户 GET launch → entry 跳转、ticket 单次兑换、目标 `entry_session`，以及地址栏直开 launch、F12 fetch、无用户手势脚本导航、跨站触发和无通行 Cookie 时均返回无标识 404。
 - 上游应用登录、退出、刷新和应用 Cookie；启用 `rewrite-to-upstream` 时确认上游不再返回 `ORIGIN_NOT_ALLOWED`。
 - GET、HEAD、POST、PUT、PATCH、DELETE、OPTIONS 与 405 Allow。
 - API JSON 错误状态不转成 HTML。
@@ -156,4 +166,4 @@ curl -i https://portal.apps.example.com/
 
 ## 7. 发布和回滚
 
-代码更新时在本地重新生成 Dashboard 包并完成仓库策略、测试、覆盖率和部署 dry-run 验证。push、pull request、tag 和 GitHub Release 不会触发远端构建、测试或发布；如需 Release 资产，应在本地生成并验证后手动上传。Wrangler 部署可按 Cloudflare Deployment 回滚代码；变量、Secret、Rate Limiter、Custom Domain 和 Vercel WAF 是外部状态，需要单独保存变更记录和回滚步骤。
+代码更新时在本地重新生成 Dashboard 包并完成仓库策略、测试、覆盖率和部署 dry-run 验证。push、pull request、tag 和 GitHub Release 不会触发远端构建、测试或发布；如需 Release 资产，应在本地生成并验证后手动上传。Wrangler 部署可按 Cloudflare Deployment 回滚代码；变量、Secret、Rate Limiter、Durable Object migration/namespace、Custom Domain 和 Vercel WAF 是外部状态，需要单独保存变更记录和回滚步骤。回滚到不使用单次兑换的旧 Worker 时可保留 Durable Object namespace；确认不再需要后再单独清理，不能在普通代码回滚中直接删除。
