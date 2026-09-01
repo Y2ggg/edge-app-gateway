@@ -76,9 +76,11 @@ document.querySelector('#base-domain').addEventListener('input', () => {
   markOutputsStale();
 });
 
-for (const selector of ['#worker-name', '#session-ttl']) {
-  document.querySelector(selector).addEventListener('input', markOutputsStale);
-}
+document.querySelector('#worker-name').addEventListener('input', () => {
+  syncRateLimitNamespaceId();
+  markOutputsStale();
+});
+document.querySelector('#session-ttl').addEventListener('input', markOutputsStale);
 
 document.querySelector('#session-secret').addEventListener('input', () => {
   invalidatePasswordHashes('Session Secret 已修改，请重新生成全部配置。');
@@ -188,6 +190,7 @@ document.querySelector('#verification-form').addEventListener('submit', async ev
   await verifyExistingConfiguration();
 });
 
+syncRateLimitNamespaceId();
 addProject();
 showStep(1);
 showWorkspaceTab('generator');
@@ -440,6 +443,10 @@ async function generateProductionConfiguration() {
   if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(workerName)) {
     throw new Error('Worker 名称只能包含小写字母、数字、短横线和下划线。');
   }
+  const rateLimitNamespaceId = validateRateLimitNamespaceId(
+    readValue('#rate-limit-namespace-id'),
+    workerName
+  );
 
   if (!Number.isInteger(ttlSeconds) || ttlSeconds < 300 || ttlSeconds > 604800) {
     throw new Error('Session 有效期必须是 300–604800 之间的整数。');
@@ -632,13 +639,6 @@ async function generateProductionConfiguration() {
       launchUrl.searchParams.set('target', `${alias}.${baseDomain}`);
       return { alias, entryAlias: project.entryAccess.entryAlias, url: launchUrl.toString() };
     });
-  const deployArguments = [
-    'npx wrangler deploy',
-    `  --name ${shellQuote(workerName)}`,
-    ...Object.entries(vars).map(([name, value]) => `  --var ${shellQuote(`${name}:${value}`)}`),
-    ...customDomains.map(domain => `  --domain ${shellQuote(domain)}`),
-    '  --secrets-file /dev/stdin'
-  ];
   const variablesFileName = `${workerName}.production.variables.json`;
   const variablesFile = {
     format: CONFIG_FILE_FORMAT,
@@ -646,6 +646,7 @@ async function generateProductionConfiguration() {
     exportedAt: new Date().toISOString(),
     worker: {
       name: workerName,
+      rateLimitNamespaceId,
       customDomains
     },
     vars,
@@ -654,7 +655,9 @@ async function generateProductionConfiguration() {
   const variablesFilePath = `../${variablesFileName}`;
   const deployCommandPrefix = [
     'npm --prefix cloudflare-worker run deploy:config --',
-    shellQuote(variablesFilePath)
+    shellQuote(variablesFilePath),
+    '--worker',
+    shellQuote(workerName)
   ].join(' ');
   const checkCommand = `${deployCommandPrefix} --check`;
   const dryRunCommand = `${deployCommandPrefix} --dry-run`;
@@ -689,6 +692,9 @@ async function generateProductionConfiguration() {
     healthCheckCommands
   ].join('\n');
   const environment = [
+    '# Worker 实例配置',
+    `worker.rateLimitNamespaceId=${rateLimitNamespaceId}`,
+    '',
     '# 普通变量（Wrangler --var）',
     ...Object.entries(vars).map(([name, value]) => `${name}=${value}`),
     '',
@@ -701,6 +707,7 @@ async function generateProductionConfiguration() {
 
   return {
     workerName,
+    rateLimitNamespaceId,
     projectCount: Object.keys(projects).length,
     routeJson,
     secrets,
@@ -711,7 +718,6 @@ async function generateProductionConfiguration() {
     variablesFile,
     variablesFileName,
     environment,
-    wranglerCommand: deployArguments.join(' \\\n'),
     checkCommand,
     dryRunCommand,
     deployCommand,
@@ -723,9 +729,7 @@ async function generateProductionConfiguration() {
 
 function renderGeneratedConfiguration(generated) {
   document.querySelector('#route-json-output').value = generated.routeJson;
-  document.querySelector('#secret-bulk-output').value = JSON.stringify(generated.secrets, null, 2);
   document.querySelector('#environment-output').value = generated.environment;
-  document.querySelector('#wrangler-command-output').value = generated.wranglerCommand;
   document.querySelector('#config-check-command-output').value = generated.checkCommand;
   document.querySelector('#config-dry-run-command-output').value = generated.dryRunCommand;
   document.querySelector('#config-deploy-command-output').value = generated.deployCommand;
@@ -736,6 +740,7 @@ function renderGeneratedConfiguration(generated) {
     .map(item => `${item.alias}: ${item.url}`)
     .join('\n');
   document.querySelector('#generated-hostnames').textContent = generated.customDomains.join(', ');
+  document.querySelector('#generated-rate-limit-namespace').textContent = generated.rateLimitNamespaceId;
   document.querySelector('#generated-vars').textContent = Object.keys(generated.vars).join(', ');
   document.querySelector('#generated-secret-names').textContent = Object.keys(generated.secrets).join(', ');
   renderWafSecrets(generated.wafSecrets);
@@ -783,9 +788,7 @@ function markOutputsStale() {
 function clearProductionOutputs() {
   for (const selector of [
     '#route-json-output',
-    '#secret-bulk-output',
     '#environment-output',
-    '#wrangler-command-output',
     '#config-check-command-output',
     '#config-dry-run-command-output',
     '#config-deploy-command-output',
@@ -800,7 +803,8 @@ function clearProductionOutputs() {
 }
 
 function resetGenerator() {
-  document.querySelector('#worker-name').value = 'vercel-route';
+  document.querySelector('#worker-name').value = 'lx-cm-route';
+  syncRateLimitNamespaceId();
   document.querySelector('#base-domain').value = '';
   document.querySelector('#session-ttl').value = '28800';
   document.querySelector('#session-secret').value = '';
@@ -857,6 +861,7 @@ async function importVariablesFile(file) {
 
   const imported = validateVariablesFile(parsed);
   document.querySelector('#worker-name').value = imported.workerName;
+  document.querySelector('#rate-limit-namespace-id').value = imported.rateLimitNamespaceId;
   document.querySelector('#base-domain').value = imported.baseDomain;
   document.querySelector('#session-ttl').value = String(imported.ttlSeconds);
   document.querySelector('#session-secret').value = imported.sessionSecret;
@@ -901,6 +906,10 @@ function validateVariablesFile(value) {
   if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(workerName)) {
     throw new Error('变量文件中的 Worker 名称无效。');
   }
+  const rateLimitNamespaceId = validateRateLimitNamespaceId(
+    value.worker?.rateLimitNamespaceId,
+    workerName
+  );
 
   const baseDomain = parseBaseDomain(String(value.vars?.ROUTE_BASE_DOMAIN || ''), true);
   const ttlSeconds = Number(value.vars?.ROUTE_SESSION_TTL_SECONDS);
@@ -962,7 +971,14 @@ function validateVariablesFile(value) {
     throw new Error('变量文件中的 Custom Domains 与 Alias/基础域名不一致。');
   }
 
-  return { workerName, baseDomain, ttlSeconds, sessionSecret, projects: importedProjects };
+  return {
+    workerName,
+    rateLimitNamespaceId,
+    baseDomain,
+    ttlSeconds,
+    sessionSecret,
+    projects: importedProjects
+  };
 }
 
 async function verifyExistingConfiguration() {
@@ -1228,6 +1244,36 @@ function parseBaseDomain(rawValue, required) {
     throw new Error('ROUTE_BASE_DOMAIN 必须是有效域名，不能包含协议、端口、路径或通配符。');
   }
   return value;
+}
+
+function syncRateLimitNamespaceId() {
+  const workerName = readValue('#worker-name');
+  const input = document.querySelector('#rate-limit-namespace-id');
+  input.value = /^[a-z0-9][a-z0-9_-]{0,62}$/.test(workerName)
+    ? deriveRateLimitNamespaceId(workerName)
+    : '';
+}
+
+function validateRateLimitNamespaceId(value, workerName) {
+  const namespaceId = value === undefined || value === ''
+    ? deriveRateLimitNamespaceId(workerName)
+    : String(value);
+
+  if (!/^[1-9][0-9]{0,9}$/.test(namespaceId) || Number(namespaceId) > 2147483647) {
+    throw new Error('Rate Limiter Namespace ID 必须是 1–2147483647 的整数。');
+  }
+  return namespaceId;
+}
+
+function deriveRateLimitNamespaceId(workerName) {
+  if (workerName === 'lx-cm-route') return '1001';
+
+  let hash = 2166136261;
+  for (let index = 0; index < workerName.length; index += 1) {
+    hash ^= workerName.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return String(10000 + (hash >>> 0) % 2000000000);
 }
 
 function parseHostname(rawValue) {

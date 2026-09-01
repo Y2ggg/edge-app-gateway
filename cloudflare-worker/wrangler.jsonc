@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "vercel-route",
+  "name": "lx-cm-route",
   "main": "src/worker.js",
   "compatibility_date": "2026-07-30",
   "workers_dev": false,

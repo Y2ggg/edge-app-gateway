@@ -31,7 +31,9 @@
     "test": "npm run repository:check && node --test",
     "test:coverage": "npm run repository:check && node --test --experimental-test-coverage",
     "password:hash": "node scripts/hash-worker-password.js",
-    "session:secret": "node scripts/generate-session-secret.js"
+    "session:secret": "node scripts/generate-session-secret.js",
+    "worker:create": "node scripts/create-worker-instance.js",
+    "variables:retarget": "node scripts/retarget-variables-file.js"
   },
   "engines": {
     "node": ">=20"

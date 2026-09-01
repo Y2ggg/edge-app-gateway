@@ -33,6 +33,15 @@ test('builds multiple applications with per-project secrets and domains', () => 
   assert.match(generatorScript, /bindingOwners\.has/);
 });
 
+test('derives and exports an isolated rate limiter namespace per Worker', () => {
+  assert.match(generatorHtml, /id="rate-limit-namespace-id"[^>]*readonly/);
+  assert.match(generatorHtml, /不同 Worker 使用不同账号级计数空间/);
+  assert.match(generatorScript, /function deriveRateLimitNamespaceId/);
+  assert.match(generatorScript, /rateLimitNamespaceId,/);
+  assert.match(generatorScript, /syncRateLimitNamespaceId/);
+  assert.match(generatorScript, /workerName === 'lx-cm-route'[^\n]*return '1001'/);
+});
+
 test('configures signed unified-entry access and produces launch links', () => {
   assert.match(generatorHtml, /data-field="entry-access"/);
   assert.match(generatorHtml, /data-field="entry-alias"/);
@@ -132,9 +141,12 @@ test('generates one repository-root deployment flow with synchronized filenames'
   assert.match(generatorHtml, /id="config-deploy-command-output"/);
   assert.match(generatorHtml, /id="complete-deploy-flow-output"/);
   assert.match(generatorHtml, /data-default-label="复制完整部署流程"/);
-  assert.match(generatorHtml, /高级部署方式/);
+  assert.match(generatorHtml, /高级检查/);
+  assert.match(generatorHtml, /多 Worker 部署必须使用上方变量文件命令/);
   assert.match(generatorScript, /const variablesFilePath = `\.\.\/\$\{variablesFileName\}`/);
   assert.match(generatorScript, /npm --prefix cloudflare-worker run deploy:config --/);
+  assert.match(generatorScript, /'--worker'/);
+  assert.match(generatorScript, /shellQuote\(workerName\)/);
   assert.match(generatorScript, /const checkCommand = `\$\{deployCommandPrefix\} --check`/);
   assert.match(generatorScript, /const dryRunCommand = `\$\{deployCommandPrefix\} --dry-run`/);
   assert.match(generatorScript, /chmod 600/);
@@ -158,8 +170,10 @@ test('explains CLI and WebDAV-safe ownership of variables', () => {
   assert.match(generatorHtml, /不需要 Cloudflare Dashboard/);
   assert.match(generatorHtml, /普通变量：/);
   assert.match(generatorHtml, /Cloudflare Secrets：/);
-  assert.match(generatorScript, /--secrets-file \/dev\/stdin/);
+  assert.match(generatorHtml, /成功后清理变量文件中不再存在的远端 Secret/);
+  assert.match(generatorScript, /worker\.rateLimitNamespaceId=/);
   assert.match(generatorScript, /# Secrets（Wrangler --secrets-file/);
+  assert.doesNotMatch(generatorHtml, /复制 Wrangler 命令|复制 Secret JSON/);
 });
 
 test('keeps the generator script syntactically valid', () => {

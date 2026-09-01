@@ -15,7 +15,7 @@
 
 本地 `tools/config-generator.html` 可同时维护 1–200 个应用。工具按“Gateway、应用、部署结果”三个步骤工作，应用列表中一次只展开一个编辑器。全局填写 Worker 名称与 `ROUTE_BASE_DOMAIN`，每个应用默认只填写 Alias 和 Vercel Production URL；点击唯一的“生成全部配置”后，工具统一校验所有应用并补齐需要的 Session Secret、passwordHash、Origin Secret、`alias.ROUTE_BASE_DOMAIN`、Binding、安全默认策略、完整路由表和逐项目 WAF Secret。导入只恢复编辑状态，不会静默生成或导出；生成器完全离线，不使用 localStorage、sessionStorage 或 IndexedDB。
 
-工具导出的 `*.production.variables.json` 同时是敏感备份和 `deploy:config` 的输入，包含普通变量、完整路由表、Session Secret、所有 Origin Secret 和 Custom Domains。它可以保存在受控 WebDAV 目录，但 WebDAV 必须使用 HTTPS、独立凭据和严格访问控制；若服务端不是端到端加密，文件应额外加密。推荐通过系统挂载或同步客户端提供本地路径，生成器不直接保存 WebDAV 凭据或连接远端。默认部署流程从 `edge-app-gateway` 仓库根目录运行 `npm --prefix cloudflare-worker run deploy:config -- ../<文件名>`；生成器会输出校验、dry-run、正式部署和健康检查的完整命令，并保证命令文件名与下载文件名一致。
+工具导出的 `*.production.variables.json` 同时是敏感备份和 `deploy:config` 的输入，包含普通变量、完整路由表、Session Secret、所有 Origin Secret 和 Custom Domains。它可以保存在受控 WebDAV 目录，但 WebDAV 必须使用 HTTPS、独立凭据和严格访问控制；若服务端不是端到端加密，文件应额外加密。推荐通过系统挂载或同步客户端提供本地路径，生成器不直接保存 WebDAV 凭据或连接远端。默认部署流程从 `edge-app-gateway` 仓库根目录运行 `npm --prefix cloudflare-worker run deploy:config -- ../<文件名> --worker '<Worker 名>'`；生成器会输出校验、dry-run、正式部署和健康检查的完整命令，并保证命令中的 Worker 名与下载文件内容一致。
 
 变量文件协议为版本化 JSON：
 
@@ -24,7 +24,8 @@
   "format": "edge-app-gateway.variables",
   "version": 1,
   "worker": {
-    "name": "vercel-route",
+    "name": "lx-cm-route",
+    "rateLimitNamespaceId": "1001",
     "customDomains": ["portal.apps.example.com"]
   },
   "vars": {
@@ -38,6 +39,8 @@
   }
 }
 ```
+
+`worker.name` 是正式部署的 Worker 目标，而不是仅用于显示的名称。命令必须显式提供相同的 `--worker`，不一致时部署脚本会拒绝继续。`worker.rateLimitNamespaceId` 是该 Worker 的账号级登录限流命名空间；不同逻辑 Worker 必须使用不同值，否则 Cloudflare 会共享相同 key 的限流计数。默认 Worker `lx-cm-route` 在从旧名称迁移时沿用 `1001`，其他名称由生成器稳定生成。部署脚本根据变量文件生成仅在本次命令中使用的私有临时 Wrangler 配置，完成或失败后都会删除。
 
 明文 Gateway 密码不会进入变量文件，只保存使用 Session Secret 生成的 `passwordHash`。CLI 部署脚本会重新校验路由与文件字段，并通过 Wrangler 标准输入上传 Secrets。
 

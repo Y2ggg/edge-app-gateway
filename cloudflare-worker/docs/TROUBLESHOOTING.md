@@ -94,4 +94,6 @@ npm run test:coverage
 npm run deploy:check
 ```
 
+多 Worker 部署时先检查命令中的 `--worker`，再查看变量文件校验摘要中的 Worker 名称和 `Rate Limiter Namespace`。缺少 `--worker`，或它与文件内名称不一致时，部署脚本会在访问 Cloudflare 前拒绝执行。如果两个不同逻辑 Worker 显示相同 Namespace，请停止正式部署并用最新版生成器重新导出；不要手工使用裸 `wrangler deploy --name` 绕过部署脚本。初始化空 Worker 时若提示同名实例已存在，属于防覆盖保护，后续直接部署变量文件即可。
+
 以上维护和验证命令均在本地手动执行，不会由 push、pull request 或 tag 触发。不要直接修改 `dashboard/worker.js`；修复模块源码、测试后重新生成。

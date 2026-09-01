@@ -1,8 +1,16 @@
 import { spawn } from 'node:child_process';
-import { access, readFile, stat } from 'node:fs/promises';
+import { access, readFile, rm, stat } from 'node:fs/promises';
 import { basename, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRouteProjects } from '../lib/route-config.js';
+import {
+  createWorkerInstanceConfig,
+  resolveRateLimitNamespaceId
+} from './worker-instance-config.js';
+import {
+  reconcileRemoteSecrets,
+  SecretReconciliationError
+} from './secret-reconciliation.js';
 
 const CONFIG_FILE_FORMAT = 'edge-app-gateway.variables';
 const CONFIG_FILE_VERSION = 1;
@@ -20,23 +28,18 @@ const wranglerBin = fileURLToPath(
 );
 
 async function main() {
-  const argumentsList = process.argv.slice(2);
-  const dryRun = argumentsList.includes('--dry-run');
-  const checkOnly = argumentsList.includes('--check');
-  const unknownOptions = argumentsList.filter(argument => argument.startsWith('--'))
-    .filter(argument => !['--dry-run', '--check'].includes(argument));
-  const fileArguments = argumentsList.filter(argument => !argument.startsWith('--'));
-
-  if (unknownOptions.length || fileArguments.length !== 1 || (dryRun && checkOnly)) {
+  const parsedArguments = parseArguments(process.argv.slice(2));
+  if (!parsedArguments) {
     printUsage();
     process.exitCode = 1;
     return;
   }
+  const { checkOnly, configFile, dryRun, requestedWorkerName } = parsedArguments;
 
   let secretValues = [];
 
   try {
-    const configPath = await locateConfigPath(fileArguments[0]);
+    const configPath = await locateConfigPath(configFile);
     const fileInfo = await readConfigFileInfo(configPath);
     let parsed;
 
@@ -52,6 +55,12 @@ async function main() {
     secretValues = Object.values(parsed?.secrets || {})
       .filter(value => typeof value === 'string' && value.length > 0);
     const config = validateVariablesFile(parsed);
+    if (config.workerName !== requestedWorkerName) {
+      throw new CliError(
+        'WORKER_MISMATCH',
+        `命令指定的 Worker“${requestedWorkerName}”与变量文件中的“${config.workerName}”不一致。`
+      );
+    }
     printSummary(config, checkOnly ? '校验通过' : dryRun ? '准备 dry-run' : '准备部署');
 
     if (checkOnly) return;
@@ -69,11 +78,82 @@ async function main() {
       throw classifyWranglerFailure(`${result.stdout}\n${result.stderr}`);
     }
 
-    if (!dryRun) printDeploymentResult(config, `${result.stdout}\n${result.stderr}`);
+    if (!dryRun) {
+      let reconciliation;
+      try {
+        reconciliation = await reconcileRemoteSecrets({
+          desiredSecretNames: config.secretNames,
+          runCommand: (argumentsList, input) => runProcess(
+            [wranglerBin, ...argumentsList],
+            input
+          ),
+          workerName: config.workerName
+        });
+      } catch (error) {
+        if (error instanceof SecretReconciliationError) {
+          throw new CliError(
+            'SECRET_RECONCILIATION_FAILED',
+            [
+              'Worker 新版本已部署，但远端 Secret 未能完全收敛。',
+              safeMessage(error),
+              '请检查 Cloudflare API 状态后重新运行同一正式部署命令。'
+            ].join('\n')
+          );
+        }
+        throw error;
+      }
+      const deployedVersionId = extractVersionId(`${result.stdout}\n${result.stderr}`);
+      const activeVersionId = reconciliation.deleted.length
+        ? await readLatestActiveVersionId(config.workerName)
+        : deployedVersionId;
+      printDeploymentResult(config, {
+        activeVersionId,
+        deployedVersionId,
+        reconciliation
+      });
+    }
   } catch (error) {
     console.error(formatCliError(error, secretValues));
     process.exitCode = 1;
   }
+}
+
+function parseArguments(argumentsList) {
+  let checkOnly = false;
+  let configFile = null;
+  let dryRun = false;
+  let requestedWorkerName = null;
+
+  for (let index = 0; index < argumentsList.length; index += 1) {
+    const argument = argumentsList[index];
+
+    if (argument === '--check') {
+      if (checkOnly) return null;
+      checkOnly = true;
+    } else if (argument === '--dry-run') {
+      if (dryRun) return null;
+      dryRun = true;
+    } else if (argument === '--worker') {
+      const value = argumentsList[index + 1];
+      if (requestedWorkerName || !value || value.startsWith('--')) return null;
+      requestedWorkerName = value;
+      index += 1;
+    } else if (argument.startsWith('--') || configFile) {
+      return null;
+    } else {
+      configFile = argument;
+    }
+  }
+
+  if (
+    !configFile ||
+    checkOnly && dryRun ||
+    !requestedWorkerName ||
+    !WORKER_NAME_PATTERN.test(requestedWorkerName)
+  ) {
+    return null;
+  }
+  return { checkOnly, configFile, dryRun, requestedWorkerName };
 }
 
 async function locateConfigPath(inputPath) {
@@ -143,6 +223,10 @@ function validateVariablesFile(value) {
   if (typeof workerName !== 'string' || !WORKER_NAME_PATTERN.test(workerName)) {
     throw new CliError('INVALID_CONFIG', 'Worker 名称无效。');
   }
+  const rateLimitNamespaceId = validateRateLimitNamespaceId(
+    value.worker?.rateLimitNamespaceId,
+    workerName
+  );
 
   const vars = value.vars;
   if (!vars || Array.isArray(vars) || typeof vars !== 'object') {
@@ -237,6 +321,7 @@ function validateVariablesFile(value) {
 
   return {
     workerName,
+    rateLimitNamespaceId,
     vars,
     secrets,
     customDomains: expectedDomains,
@@ -245,6 +330,17 @@ function validateVariablesFile(value) {
     secretNames: Object.keys(secrets),
     secretValues: Object.values(secrets).filter(value => typeof value === 'string' && value)
   };
+}
+
+function validateRateLimitNamespaceId(value, workerName) {
+  try {
+    return resolveRateLimitNamespaceId(value, workerName);
+  } catch (error) {
+    throw new CliError(
+      'INVALID_CONFIG',
+      `worker.rateLimitNamespaceId 无效：${safeMessage(error)}`
+    );
+  }
 }
 
 function validateBaseDomain(value) {
@@ -305,22 +401,33 @@ async function ensureWranglerAuthenticated(secretValues) {
   }
 }
 
-function runWrangler(config, { configPath, dryRun }) {
-  const wranglerArguments = [
-    wranglerBin,
-    'deploy',
-    '--name',
+async function runWrangler(config, { configPath, dryRun }) {
+  const temporaryConfig = await createWorkerInstanceConfig(
     config.workerName,
-    ...Object.entries(config.vars).flatMap(([name, value]) => ['--var', `${name}:${value}`]),
-    ...config.customDomains.flatMap(domain => ['--domain', domain]),
-    '--secrets-file',
-    '/dev/stdin',
-    '--message',
-    `Deploy from ${basename(configPath)}`
-  ];
+    config.rateLimitNamespaceId
+  );
 
-  if (dryRun) wranglerArguments.push('--dry-run');
-  return runProcess(wranglerArguments, JSON.stringify(config.secrets));
+  try {
+    const wranglerArguments = [
+      wranglerBin,
+      'deploy',
+      '--config',
+      temporaryConfig.path,
+      '--name',
+      config.workerName,
+      ...Object.entries(config.vars).flatMap(([name, value]) => ['--var', `${name}:${value}`]),
+      ...config.customDomains.flatMap(domain => ['--domain', domain]),
+      '--secrets-file',
+      '/dev/stdin',
+      '--message',
+      `Deploy from ${basename(configPath)}`
+    ];
+
+    if (dryRun) wranglerArguments.push('--dry-run');
+    return await runProcess(wranglerArguments, JSON.stringify(config.secrets));
+  } finally {
+    await rm(temporaryConfig.directory, { recursive: true, force: true });
+  }
 }
 
 function runProcess(argumentsList, input = '') {
@@ -376,6 +483,7 @@ function classifyWranglerFailure(output) {
 function printSummary(config, action) {
   console.log(`${action}：Worker ${config.workerName}`);
   console.log(`应用数量：${config.projectCount}`);
+  console.log(`Rate Limiter Namespace：${config.rateLimitNamespaceId}`);
   console.log(`Custom Domains：${config.customDomains.join(', ')}`);
   console.log(`Secret Bindings：${config.secretNames.join(', ')}`);
 }
@@ -390,17 +498,51 @@ function printSecurityNotice(configPath, mode) {
   }
 }
 
-function printDeploymentResult(config, wranglerOutput) {
-  const versionId = wranglerOutput.match(/Current Version ID:\s*([a-f0-9-]+)/i)?.[1]
-    || '未能从 Wrangler 输出解析';
+function printDeploymentResult(config, { activeVersionId, deployedVersionId, reconciliation }) {
   console.log('\n部署完成');
   console.log(`Worker 名称：${config.workerName}`);
-  console.log(`Version ID：${versionId}`);
+  console.log(`代码部署 Version ID：${deployedVersionId || '未能从 Wrangler 输出解析'}`);
+  if (reconciliation.deleted.length) {
+    console.log(`最终活动 Version ID：${activeVersionId || '未能从 Cloudflare 确认'}`);
+  }
   console.log(`Custom Domains：${config.customDomains.join(', ')}`);
   console.log(`Secret Bindings：${config.secretNames.join(', ')}`);
+  console.log(reconciliation.deleted.length
+    ? `已删除残留 Secret：${reconciliation.deleted.join(', ')}`
+    : 'Secret 收敛：远端没有残留 Binding。');
   console.log('公开健康检查命令：');
   for (const domain of config.healthDomains) {
     console.log(`curl -fsS ${shellQuote(`https://${domain}/_edge-gateway/health`)}`);
+  }
+}
+
+function extractVersionId(output) {
+  return output.match(/Current Version ID:\s*([a-f0-9-]+)/i)?.[1] || null;
+}
+
+async function readLatestActiveVersionId(workerName) {
+  const result = await runProcess([
+    wranglerBin,
+    'deployments',
+    'list',
+    '--name',
+    workerName,
+    '--json'
+  ]);
+  if (result.exitCode !== 0) return null;
+
+  try {
+    const deployments = JSON.parse(result.stdout);
+    if (!Array.isArray(deployments) || !deployments.length) return null;
+    const versions = deployments.at(-1)?.versions;
+    if (!Array.isArray(versions)) return null;
+    const activeVersion = versions.find(version => version?.percentage === 100);
+    const versionId = activeVersion?.version_id;
+    return typeof versionId === 'string' && /^[a-f0-9-]+$/i.test(versionId)
+      ? versionId
+      : null;
+  } catch {
+    return null;
   }
 }
 
@@ -412,6 +554,8 @@ function formatCliError(error, secretValues) {
     INVALID_JSON: 'JSON 无效',
     INVALID_CONFIG: '配置校验失败',
     SECRET_MISSING: 'Secret 缺失',
+    WORKER_MISMATCH: 'Worker 不匹配',
+    SECRET_RECONCILIATION_FAILED: 'Secret 收敛失败',
     DEPENDENCIES_MISSING: '依赖未安装',
     WRANGLER_NOT_AUTHENTICATED: 'Wrangler 未登录',
     CUSTOM_DOMAIN_CONFLICT: 'Custom Domain 冲突',
@@ -435,19 +579,21 @@ function redactSecrets(value, secretValues) {
 }
 
 function repairCommandGuide(fileName) {
-  const safeFileName = fileName || 'vercel-route.production.variables.json';
+  const safeFileName = fileName || 'lx-cm-route.production.variables.json';
   return [
     `当前工作目录：${process.env.INIT_CWD || process.cwd()}`,
     `请先进入仓库根目录：${repositoryDirectory}`,
     '然后运行：',
-    rootDeployCommand(safeFileName, '--check')
+    rootDeployCommand(safeFileName, '<worker-name>', '--check')
   ].join('\n');
 }
 
-function rootDeployCommand(fileName, option = '') {
+function rootDeployCommand(fileName, workerName, option = '') {
   const command = [
     'npm --prefix cloudflare-worker run deploy:config --',
     shellQuote(`../${fileName}`),
+    '--worker',
+    shellQuote(workerName),
     option
   ].filter(Boolean);
   return command.join(' ');
@@ -462,9 +608,9 @@ function printUsage() {
     '参数错误：必须提供一个变量文件，并且 --check 与 --dry-run 不能同时使用。',
     `请先进入仓库根目录：${repositoryDirectory}`,
     '推荐命令：',
-    rootDeployCommand('vercel-route.production.variables.json', '--check'),
-    rootDeployCommand('vercel-route.production.variables.json', '--dry-run'),
-    rootDeployCommand('vercel-route.production.variables.json')
+    rootDeployCommand('lx-cm-route.production.variables.json', 'lx-cm-route', '--check'),
+    rootDeployCommand('lx-cm-route.production.variables.json', 'lx-cm-route', '--dry-run'),
+    rootDeployCommand('lx-cm-route.production.variables.json', 'lx-cm-route')
   ].join('\n'));
 }
 

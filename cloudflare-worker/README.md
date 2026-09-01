@@ -31,7 +31,7 @@
 | `tests/` | 配置、认证、全栈代理、流式与安全测试 |
 | `dashboard/worker.js` | 从模块源码生成的 Dashboard 单文件包 |
 | `tools/config-generator.html`、`tools/config-generator.js` | 三步式离线工具：集中维护多个应用，一次生成并导出完整变量文件和逐项目 Vercel WAF Secret |
-| `scripts/deploy-variable-file.js` | 校验变量文件，并通过 Wrangler 原子配置代码、变量、Secrets 和全部 Custom Domains |
+| `scripts/deploy-variable-file.js` | 校验变量文件，并通过 Wrangler 配置代码、变量、Secrets 和全部 Custom Domains；部署成功后清理不再存在的 Secret |
 | `docs/QUICKSTART.md` | 已有 Gateway 新增应用及首次部署入口 |
 | `docs/DEPLOYMENT.md` | Cloudflare、Vercel WAF 和上线验收步骤 |
 | `docs/` | 快速开始、部署、配置协议、架构和故障排查 |
@@ -59,12 +59,19 @@ npm run deploy:check
 使用生成器导出的敏感变量文件时，请先进入 `edge-app-gateway` 仓库根目录。变量文件默认也下载到这里：
 
 ```bash
-npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json --check
-npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json --dry-run
-npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json
+npm --prefix cloudflare-worker run deploy:config -- ../lx-cm-route.production.variables.json --worker 'lx-cm-route' --check
+npm --prefix cloudflare-worker run deploy:config -- ../lx-cm-route.production.variables.json --worker 'lx-cm-route' --dry-run
+npm --prefix cloudflare-worker run deploy:config -- ../lx-cm-route.production.variables.json --worker 'lx-cm-route'
 ```
 
-首次使用先运行 `npm --prefix cloudflare-worker install`。变量文件包含生产 Secret，建议执行 `chmod 600 vercel-route.production.variables.json`。部署脚本会自动定位 Worker 项目目录；文件不存在时会显示解析后的完整路径和正确的根目录命令，Wrangler 未登录时会给出 `whoami`/`login` 修复步骤。
+首次使用先运行 `npm --prefix cloudflare-worker install`。变量文件包含生产 Secret，建议执行 `chmod 600 lx-cm-route.production.variables.json`。部署脚本会自动定位 Worker 项目目录；文件不存在时会显示解析后的完整路径和正确的根目录命令，Wrangler 未登录时会给出 `whoami`/`login` 修复步骤。`--worker` 必须与变量文件内的 `worker.name` 完全一致，避免把多 Worker 配置部署到错误实例。变量文件是该 Worker 的完整权威状态；正式部署成功后，脚本会删除远端不再列出的旧 Secret Binding。
+
+同一仓库可以维护多个彼此隔离的 Worker。生成器按 Worker 名称生成稳定的账号级 Rate Limiter Namespace，变量文件中的 `worker.name`、`worker.rateLimitNamespaceId` 和 Custom Domains 决定部署目标；部署脚本会生成临时 Wrangler 配置，不会把新实例的变量、Secret、域名、Durable Object 或限流计数写入旧 Worker。需要提前建立一个无公开入口的空实例时运行：
+
+```bash
+cd cloudflare-worker
+npm run worker:create -- another-gateway
+```
 
 `dashboard/worker.js` 是生成文件，业务逻辑只维护在 `src/` 和 `lib/`。`.dev.vars`、真实域名、完整生产路由表、密码、散列、会话密钥和源站密钥不得提交。
 

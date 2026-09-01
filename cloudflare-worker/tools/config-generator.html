@@ -177,7 +177,7 @@
         <div class="grid">
           <div class="field">
             <label for="worker-name">Worker 名称</label>
-            <input id="worker-name" type="text" value="vercel-route" autocomplete="off">
+            <input id="worker-name" type="text" value="lx-cm-route" autocomplete="off">
           </div>
           <div class="field">
             <label for="base-domain">多应用基础域名</label>
@@ -192,6 +192,11 @@
             <div class="field">
               <label for="session-ttl">Gateway Session 有效期（秒）</label>
               <input id="session-ttl" type="number" min="300" max="604800" value="28800">
+            </div>
+            <div class="field">
+              <label for="rate-limit-namespace-id">登录限流 Namespace ID</label>
+              <input id="rate-limit-namespace-id" type="text" value="1001" readonly>
+              <small>根据 Worker 名称稳定生成；不同 Worker 使用不同账号级计数空间。</small>
             </div>
             <div class="field">
               <label for="session-secret">ROUTE_SESSION_SECRET（可留空）</label>
@@ -382,6 +387,7 @@
           </div>
           <ul class="config-list">
             <li>Custom Domains：<code id="generated-hostnames"></code></li>
+            <li>Rate Limiter Namespace：<code id="generated-rate-limit-namespace"></code></li>
             <li>普通变量：<code id="generated-vars"></code></li>
             <li>Cloudflare Secrets：<code id="generated-secret-names"></code></li>
           </ul>
@@ -424,7 +430,7 @@
               <span class="flow-number">4</span>
               <div class="flow-content">
                 <h3>正式部署</h3>
-                <p>上传 Worker、普通变量、Secrets 和全部 Custom Domains。</p>
+                <p>上传完整 Worker 配置；成功后清理变量文件中不再存在的远端 Secret。</p>
                 <div class="command-copy-row">
                   <input id="config-deploy-command-output" readonly aria-label="正式部署命令">
                   <button class="secondary" data-copy="config-deploy-command-output" data-default-label="复制" type="button">复制</button>
@@ -448,14 +454,9 @@
           </div>
 
           <details class="subpanel">
-            <summary>高级部署方式</summary>
-            <p>仅在明确需要跳过变量文件时，才使用 Wrangler 标准输入方式。</p>
-            <textarea class="output" id="wrangler-command-output" readonly></textarea>
-            <button class="secondary" data-copy="wrangler-command-output" data-default-label="复制 Wrangler 命令" type="button">复制 Wrangler 命令</button>
-            <p>执行命令后粘贴下方 Secret JSON，再按 <code>Ctrl-D</code>。</p>
-            <textarea class="output sensitive" id="secret-bulk-output" readonly></textarea>
-            <button class="secondary" data-copy="secret-bulk-output" data-default-label="复制 Secret JSON" type="button">复制 Secret JSON</button>
-            <label for="advanced-inspection-output" style="margin-top: 16px">账号、Binding 与部署记录检查</label>
+            <summary>高级检查</summary>
+            <p>多 Worker 部署必须使用上方变量文件命令，以便自动应用实例独立的限流配置。</p>
+            <label for="advanced-inspection-output">账号、Binding 与部署记录检查</label>
             <textarea class="output" id="advanced-inspection-output" readonly></textarea>
             <button class="secondary" data-copy="advanced-inspection-output" data-default-label="复制高级检查命令" type="button">复制高级检查命令</button>
           </details>

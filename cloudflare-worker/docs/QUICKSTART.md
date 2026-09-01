@@ -49,7 +49,7 @@ npm --prefix cloudflare-worker install
 该文件包含生产 Secrets：
 
 ```bash
-chmod 600 vercel-route.production.variables.json
+chmod 600 lx-cm-route.production.variables.json
 ```
 
 文件不得提交到 Git。建议保存到密码保险库、加密磁盘或其他受控位置。
@@ -71,12 +71,12 @@ THEN Log
 从仓库根目录运行生成器给出的命令：
 
 ```bash
-npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json --check
-npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json --dry-run
-npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json
+npm --prefix cloudflare-worker run deploy:config -- ../lx-cm-route.production.variables.json --worker 'lx-cm-route' --check
+npm --prefix cloudflare-worker run deploy:config -- ../lx-cm-route.production.variables.json --worker 'lx-cm-route' --dry-run
+npm --prefix cloudflare-worker run deploy:config -- ../lx-cm-route.production.variables.json --worker 'lx-cm-route'
 ```
 
-正式部署会同时更新 Worker 代码、普通变量、Secrets 和全部 Custom Domains。配置文件中删除的旧 Secret 不会被自动清理，避免误删仍在使用的远端 Secret。
+正式部署会同时更新 Worker 代码、普通变量、Secrets 和全部 Custom Domains。变量文件是该 Worker 的完整权威状态：新版本部署成功且所需 Binding 全部存在后，部署脚本会自动删除文件中不再存在的旧 Secret；部署失败和 dry-run 均不会清理。
 
 ### 6. 验收并收紧源站
 
@@ -120,6 +120,8 @@ npx wrangler whoami
 npx wrangler login
 cd ..
 ```
+
+如需在同一账号建立另一套完全独立的 Gateway，可先执行 `npm run worker:create -- <新 Worker 名>`。配置生成器会为每个 Worker 名生成独立的 Rate Limiter Namespace，后续仍使用同一条 `deploy:config` 命令；实际目标由导出文件内的 `worker.name` 决定。
 
 然后在配置工具中创建第一份完整配置，按本指南的 WAF、校验、dry-run、部署和验收顺序操作。生产环境必须保持 `workers_dev=false` 和 `preview_urls=false`。
 

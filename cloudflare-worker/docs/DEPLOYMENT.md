@@ -34,6 +34,8 @@ npm run deploy:check
 
 `ENTRY_TICKET_REDEEMER` 为每张 handoff ticket 提供原子单次兑换状态；对应 `v1` Durable Object migration 也必须保留。本地 `wrangler dev` 不需要开放生产 Preview URL。若团队确需远程开发 Preview，请另建不参与生产部署的开发配置，不能把生产开关改回 true。
 
+同一账号部署多个 Gateway Worker 时，不能直接对不同 `--name` 重复使用静态 `namespace_id=1001`。Cloudflare Rate Limiter Namespace 在账号级生效，相同 ID 会跨 Worker 共享计数。生成器会在变量文件中写入 `worker.rateLimitNamespaceId`，正式部署脚本据此生成实例专用临时 Wrangler 配置；Durable Object、变量、Secret 和 Custom Domain 也继续按 Worker 名隔离。
+
 ## 2. 准备配置和密钥
 
 1. 运行 `npm run session:secret` 生成 `ROUTE_SESSION_SECRET`。只有存在 Edge Access required 路由时才需要。
@@ -79,26 +81,46 @@ npm run deploy:check
 cd cloudflare-worker
 npm install
 npx wrangler whoami
-npx wrangler secret list --name vercel-route
+npx wrangler secret list --name lx-cm-route
 cd ..
 ```
+
+如果希望先在 Cloudflare 建立一个没有 `workers.dev`、Preview URL、Custom Domain、业务变量或 Secret 的独立 Worker，可以执行一次：
+
+```bash
+cd cloudflare-worker
+npm run worker:create -- another-gateway
+cd ..
+```
+
+初始化命令只允许创建不存在的 Worker，发现同名实例时会拒绝覆盖。以后无需重复初始化，直接用生成器导出的变量文件部署即可。
+
+已有 Gateway 需要更换 Worker 名称时，先复制并重定向完整变量文件，禁止手工编辑或在终端打印 Secret：
+
+```bash
+npm --prefix cloudflare-worker run variables:retarget -- ../old-gateway.production.variables.json new-gateway
+```
+
+该命令保留源文件，生成权限为 `600` 的 `new-gateway.production.variables.json`，只更新 `worker.name`、Rate Limiter Namespace 和导出时间。随后使用显式 `--worker 'new-gateway'` 完成校验、dry-run 和正式部署。确认新 Worker 已接管全部 Custom Domain、Secret、变量和健康检查后，才能删除旧 Worker。
 
 变量文件可以位于本地磁盘或已挂载/同步的 WebDAV 目录。以下推荐流程统一从 `edge-app-gateway` 仓库根目录执行；先校验，再 dry-run，最后部署：
 
 ```bash
-chmod 600 vercel-route.production.variables.json
-npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json --check
-npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json --dry-run
-npm --prefix cloudflare-worker run deploy:config -- ../vercel-route.production.variables.json
+chmod 600 lx-cm-route.production.variables.json
+npm --prefix cloudflare-worker run deploy:config -- ../lx-cm-route.production.variables.json --worker 'lx-cm-route' --check
+npm --prefix cloudflare-worker run deploy:config -- ../lx-cm-route.production.variables.json --worker 'lx-cm-route' --dry-run
+npm --prefix cloudflare-worker run deploy:config -- ../lx-cm-route.production.variables.json --worker 'lx-cm-route'
 ```
 
-`npm --prefix` 会让部署脚本在 `cloudflare-worker/` 内运行，因此根目录变量文件参数使用 `../<文件名>`。部署脚本会从自身位置自动定位 Worker 和 Wrangler，校验文件版本、路由协议、Secret Binding、Alias、基础域名及全部 Custom Domains。Secret JSON 只写入 Wrangler 标准输入，不出现在命令行参数或脚本日志中。普通变量使用 `--var`，每个精确域名使用一个 `--domain`；Rate Limiter、Durable Object Binding/migration、`workers_dev=false` 和 `preview_urls=false` 继续由 `wrangler.jsonc` 管理。
+`npm --prefix` 会让部署脚本在 `cloudflare-worker/` 内运行，因此根目录变量文件参数使用 `../<文件名>`。部署脚本会从自身位置自动定位 Worker 和 Wrangler，校验文件版本、路由协议、Secret Binding、Alias、基础域名、Rate Limiter Namespace 及全部 Custom Domains。Secret JSON 只写入 Wrangler 标准输入，不出现在命令行参数或脚本日志中。普通变量使用 `--var`，每个精确域名使用一个 `--domain`；Durable Object Binding/migration、`workers_dev=false` 和 `preview_urls=false` 继承自 `wrangler.jsonc`，Worker 名和 Rate Limiter Namespace 则由变量文件覆盖到一次性临时配置。
 
-`--check` 完全在本地执行，不检查登录、不访问 Cloudflare。`--dry-run` 调用 Wrangler 构建但不会正式部署。正式部署成功后，脚本会输出 Worker 名称、Version ID、Custom Domains、Secret Binding 名称，以及统一入口和未受入口限制域名的健康检查命令；任何输出都会过滤已知 Secret 值。
+部署命令原生支持多 Worker：每份变量文件中的 `worker.name` 决定唯一目标，命令上的 `--worker` 必须再次明确写出同一名称。两者不一致时在任何 Cloudflare 写操作前失败。对一个 Worker 部署不会修改另一个 Worker 的普通变量、Secret、Custom Domain 或 Deployment。不要绕过变量文件直接复制裸 `npx wrangler deploy --name ...`，否则无法保证实例级限流配置同步。
+
+`--check` 完全在本地执行，不检查登录、不访问 Cloudflare。`--dry-run` 调用 Wrangler 构建但不会正式部署。正式部署成功后，脚本会输出 Worker 名称、代码部署 Version ID、Secret 清理产生的最终活动 Version ID（如发生清理）、Custom Domains、Secret Binding 名称、已清理的残留 Binding，以及统一入口和未受入口限制域名的健康检查命令；任何输出都会过滤已知 Secret 值。
 
 只有全部路由都关闭 Edge Access 且未使用统一入口限制时，才可以省略 `ROUTE_SESSION_SECRET`。每个 `originProtection.secretBinding` 都必须在文件的 `secrets` 中存在，否则脚本拒绝部署。
 
-Wrangler 的 `--secrets-file` 是增量写入：从变量文件移除项目后，旧的未引用 Secret 不会自动删除。确认已无路由使用后，再显式执行 `npx wrangler secret delete <NAME> --name <WORKER>`；部署时不要盲目批量清理远端 Secret。
+Wrangler 的 `--secrets-file` 本身是增量写入，但 `deploy:config` 把变量文件视为目标 Worker 的完整权威状态。脚本先部署新代码、完整路由和所需 Secret；只有部署成功并确认所需 Binding 全部存在后，才通过 Wrangler 批量删除远端多余 Secret，再次读取远端清单验证完全一致。部署失败、所需 Binding 缺失或 `--dry-run` 时绝不执行删除。若收敛步骤失败，新版本可能已经部署，脚本会明确报错；检查 Cloudflare API 后重新运行同一正式部署命令即可安全重试。
 
 部署后访问：
 
