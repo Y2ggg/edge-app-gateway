@@ -1,6 +1,6 @@
 {
   "name": "edge-app-gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Zero-intrusion Cloudflare Workers application gateway and reverse proxy for Vercel apps",
   "private": true,
   "license": "MIT",

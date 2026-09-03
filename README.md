@@ -8,10 +8,10 @@ Zero-intrusion application gateway and reverse proxy for exposing multiple Verce
 
 多个个人或内部 Web 应用通常需要分别处理自定义域名、访问控制和源站暴露。Edge App Gateway 将这些入口能力集中到一个 Cloudflare Worker，外部应用无需安装 SDK、修改业务代码或迁移自身登录体系。
 
-- **零侵入接入**：默认只需提供 Alias 和 Vercel Production URL。
-- **多应用统一入口**：一个 Worker 根据精确 Host 路由多个应用。
+- **零侵入接入**：配置时明确填写应用语义化别名、应用角色和访问域名 Alias（统一入口 Alias 可留空），再提供 Vercel Production URL。
+- **多应用统一入口**：一个 Worker 根据精确 Host 路由多个应用；仅明确标记 `isUnifiedEntry=true` 且不填写访问域名 Alias 的应用，才会接管 `ROUTE_BASE_DOMAIN` 裸基础域名。
 - **独立访问策略**：每个应用可单独启用或关闭 Gateway 密码认证。
-- **统一入口限制**：指定 Demo 必须由已认证入口签发短时票据；直接访问 Demo 自定义域名只得到无标识 404。
+- **统一入口限制**：指定 Demo 必须由统一入口的可信导航签发短时票据；入口是否启用 Gateway 密码独立配置，直接访问 Demo 自定义域名只得到无标识 404。
 - **源站防绕过**：为每个 Vercel 项目注入独立 Secret，配合 Vercel WAF 拒绝直连。
 - **全栈透明代理**：支持常用 HTTP 方法、流式请求与响应、应用 Cookie、Authorization 和重定向。
 - **离线可视化配置**：在浏览器本地生成完整路由、Secrets、Custom Domains 和部署文件，不上传配置或凭据。
@@ -19,7 +19,7 @@ Zero-intrusion application gateway and reverse proxy for exposing multiple Verce
 ## 工作方式
 
 ```text
-浏览器访问 alias.apps.example.com
+浏览器访问 Alias.apps.example.com（或未填写 Alias 的统一入口基础域名）
                 ↓
 Cloudflare Worker 按 Host 选择应用
         ├─ 可选：验证统一入口签发的 Host 绑定通行
@@ -39,7 +39,7 @@ Gateway 不替代上游应用认证。关闭 Edge Access 只会跳过 Gateway �
 已有 Gateway 时，新增应用通常只需要一次本地配置和一条 Vercel WAF 规则：
 
 1. 在浏览器打开 [`cloudflare-worker/tools/config-generator.html`](./cloudflare-worker/tools/config-generator.html)。
-2. 导入现有 `*.production.variables.json`，新增应用的 Alias 和 Vercel Production URL。
+2. 导入现有 `*.production.variables.json`，新增应用的语义化别名、应用角色、访问域名 Alias 和 Vercel Production URL。
 3. 生成并导出更新后的完整变量文件。
 4. 根据生成结果在 Vercel 项目中添加请求头 WAF Rule，先使用 `Log`。
 5. 从仓库根目录执行校验、dry-run 和部署：
@@ -52,7 +52,7 @@ Gateway 不替代上游应用认证。关闭 Edge Access 只会跳过 Gateway �
 
 6. 确认自定义域名访问正常后，将 Vercel WAF Rule 切换为 `Deny`。
 
-若 Demo 还要求“只能从统一入口项目点击进入”，请把入口项目和 Demo 放在同一份 Gateway 路由表中：入口启用 Edge Access，Demo 的 `entryAccess.entryAlias` 指向入口。入口页面使用相对路径 `/_edge-gateway/launch?target=<Demo 域名>&next=/`；Gateway 校验同源用户导航并签发单次兑换票据，入口无需保存 Session Secret。详见[配置与安全](./cloudflare-worker/docs/CONFIGURATION.md#统一入口访问控制)。
+若 Demo 还要求“只能从统一入口项目点击进入”，请把入口项目和 Demo 放在同一份 Gateway 路由表中：入口明确标记 `isUnifiedEntry=true`（必须使用反向代理，Gateway 密码登录按需开启），Demo 的 `entryAccess.entryAlias` 指向入口语义化别名。入口页面使用相对路径 `/_edge-gateway/launch?target=<Demo 域名>&next=/`；Gateway 校验同源用户导航并签发单次兑换票据。详见[配置与安全](./cloudflare-worker/docs/CONFIGURATION.md#统一入口访问控制)。
 
 完整流程和首次部署前置条件见[快速开始](./cloudflare-worker/docs/QUICKSTART.md)与[部署手册](./cloudflare-worker/docs/DEPLOYMENT.md)。
 

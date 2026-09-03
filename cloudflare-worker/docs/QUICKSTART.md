@@ -27,12 +27,14 @@ npm --prefix cloudflare-worker install
 
 默认情况下只需填写：
 
-- **Alias**：自定义域名的第一级名称，例如 `portal`。
+- **应用语义化别名**：用于识别应用和统一入口选择，例如 `portal`。
+- **访问域名 Alias**：自定义域名的第一级名称，例如 `portal`（普通应用必填；统一入口应用可留空）。
 - **Vercel Production URL**：例如 `https://portal-app.vercel.app`。
 
 工具会自动生成或补齐：
 
-- `portal.<ROUTE_BASE_DOMAIN>` Custom Domain；
+- 按应用角色和访问域名 Alias 生成 Custom Domain；普通应用为 `Alias.<ROUTE_BASE_DOMAIN>`；
+- 若将某应用标记为统一入口且不填写访问域名 Alias，还会生成裸 `<ROUTE_BASE_DOMAIN>` Custom Domain，并将它路由到该入口；
 - 项目独立的 Origin Secret 和 Cloudflare Secret Binding；
 - 完整 `ROUTE_PROJECTS_JSON`；
 - 安全代理默认值；
@@ -40,7 +42,7 @@ npm --prefix cloudflare-worker install
 
 只有需要 Gateway 密码访问时，才启用 Edge Access 并输入该应用的访问密码。上游应用自己的登录和 Cookie 不需要写入 Gateway 配置。
 
-若某个 Demo 必须从统一入口项目点击进入，在该 Demo 上选择“必须从统一入口点击进入”，填写入口项目 Alias 和通行有效期。入口与 Demo 必须都使用反向代理；入口项目必须启用 Gateway 密码登录，并且自身不能再依赖其他入口。
+若某个 Demo 必须从统一入口项目点击进入，在该 Demo 上选择“必须从统一入口点击进入”，从“统一入口语义化别名”下拉框选择入口并填写通行有效期。入口与 Demo 必须都使用反向代理；入口是否启用 Gateway 密码登录按入口自身的 Edge Access 配置决定，并且入口自身不能再依赖其他入口。
 
 ### 3. 生成并保存变量文件
 
@@ -97,17 +99,17 @@ https://portal.apps.example.com/_edge-gateway/health
 
 ## 让 Demo 只能从统一入口进入
 
-1. 将统一入口项目作为一个普通应用加入同一份 Gateway 配置，例如 Alias `portal`，并启用 Gateway Edge Access。
-2. 在每个受限 Demo 的 `entryAccess` 中选择 `required`，将 `entryAlias` 设为 `portal`，按需设置 300–86400 秒的通行有效期。
+1. 将统一入口项目加入同一份 Gateway 配置，填写语义化别名 `portal`，将应用角色设为“统一入口应用”（必须使用反向代理；Gateway Edge Access 可按需启用）。
+2. 在每个受限 Demo 的 `entryAccess` 中选择 `required`，从下拉框选择统一入口语义化别名 `portal`，按需设置 300–86400 秒的通行有效期。
 3. 重新生成、导出、校验并部署完整变量文件。不要只部署新增 Demo 的局部路由。
-4. 统一入口数据库继续保存 Demo 的 Gateway HTTPS 地址，例如 `https://demo-app.apps.example.com/path`。入口页面把它转换为当前 Host 下的相对 launch 链接：
+4. 如需让统一入口直接使用 Gateway 基础域名访问，在配置工具中将 `portal` 标记为“统一入口应用”，并把它的访问域名 Alias 留空；生成器会把 `https://apps.example.com`（裸基础域名）加入 Worker Custom Domain。统一入口数据库继续保存 Demo 的 Gateway HTTPS 地址，例如 `https://demo-app.apps.example.com/path`。入口页面把它转换为当前 Host 下的相对 launch 链接：
 
    ```text
    /_edge-gateway/launch?target=demo-app.apps.example.com&next=%2Fpath
    ```
 
-5. 入口项目不保存 `ROUTE_SESSION_SECRET`，不自行签票，也不代理 Demo。Gateway 验证入口登录 Session 后完成签票、跨 Host 验票和目标 Cookie 设置。
-6. 验收时先登录并从入口 Card 点击 Demo，确认 launch → entry 跳转成功且同一 ticket 不能再次兑换；再分别测试地址栏直接打开 launch、F12 fetch、无用户手势脚本导航和跨站链接，均应得到隐匿 404。随后用无痕窗口直接访问 Demo 自定义域名，预期只出现中性的“页面无法打开”404；curl/API 请求应为空正文 404。
+5. 入口项目不保存 `ROUTE_SESSION_SECRET`，不自行签票，也不代理 Demo。Gateway 按入口的 Edge Access 配置决定是否验证登录 Session，然后完成签票、跨 Host 验票和目标 Cookie 设置。
+6. 验收时（若入口启用了 Edge Access 则先登录）从入口 Card 点击 Demo，确认 launch → entry 跳转成功且同一 ticket 不能再次兑换；再分别测试地址栏直接打开 launch、F12 fetch、无用户手势脚本导航和跨站链接，均应得到隐匿 404。随后用无痕窗口直接访问 Demo 自定义域名，预期只出现中性的“页面无法打开”404；curl/API 请求应为空正文 404。
 7. 继续测试 Vercel Production URL，确保缺少正确 Origin Secret 时由 WAF 拒绝；`entryAccess` 本身无法覆盖绕过 Worker 的源站地址。
 
 ## 首次部署 Gateway

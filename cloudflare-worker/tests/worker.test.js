@@ -95,6 +95,115 @@ test('exposes the namespaced health endpoint without configuration details', asy
   assert.equal(response.headers.get('cache-control'), 'private, no-store');
 });
 
+test('routes the bare gateway base domain to the configured unified entry application', async () => {
+  const entryAlias = 'portal-a7f3';
+  const targetAlias = 'docs-a7f3';
+  const entryProject = requiredProject({
+    target: 'https://portal-project.vercel.app',
+    isUnifiedEntry: true,
+    semanticAlias: entryAlias
+  });
+  const targetProject = project({
+    entryAccess: { mode: 'required', entryAlias: entryAlias, ttlSeconds: 900 },
+    semanticAlias: targetAlias
+  });
+  const environment = {
+    ...createEnvironment(),
+    ROUTE_BASE_DOMAIN: 'preview.example.com',
+    ROUTE_PROJECTS_JSON: JSON.stringify({
+      [entryAlias]: entryProject,
+      [targetAlias]: targetProject
+    })
+  };
+  const token = await createWorkerSessionToken(entryAlias, SESSION_SECRET, {
+    ttlSeconds: 600
+  });
+  let upstreamUrl;
+  const response = await handleWorkerRequest(
+    new Request('https://preview.example.com/dashboard', {
+      headers: { Cookie: `route_session=${token}` }
+    }),
+    environment,
+    {
+      fetchImpl: async url => {
+        upstreamUrl = url.toString();
+        return new Response('portal content');
+      }
+    }
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), 'portal content');
+  assert.equal(upstreamUrl, 'https://portal-project.vercel.app/dashboard');
+});
+
+test('keeps the bare gateway base domain closed until explicitly configured', async () => {
+  const entryAlias = 'portal-a7f3';
+  const targetAlias = 'docs-a7f3';
+  const environment = {
+    ...createEnvironment(),
+    ROUTE_BASE_DOMAIN: 'preview.example.com',
+    ROUTE_PROJECTS_JSON: JSON.stringify({
+      [entryAlias]: requiredProject({
+        target: 'https://portal-project.vercel.app',
+        isUnifiedEntry: true,
+        semanticAlias: entryAlias,
+        hostnameAlias: entryAlias
+      }),
+      [targetAlias]: project({
+        entryAccess: { mode: 'required', entryAlias, ttlSeconds: 900 },
+        semanticAlias: targetAlias
+      })
+    })
+  };
+  let fetchCalled = false;
+  const response = await handleWorkerRequest(
+    new Request('https://preview.example.com/', {
+      headers: documentHeaders()
+    }),
+    environment,
+    {
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response('portal content');
+      }
+    }
+  );
+
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).error.code, 'EDGE_ROUTE_NOT_FOUND');
+  assert.equal(fetchCalled, false);
+});
+
+test('routes hostname aliases to their semantic application aliases', async () => {
+  const environment = {
+    ...createEnvironment(),
+    ROUTE_BASE_DOMAIN: 'preview.example.com',
+    ROUTE_PROJECTS_JSON: JSON.stringify({
+      docs: project({
+        semanticAlias: 'docs',
+        isUnifiedEntry: false,
+        hostnameAlias: 'documentation'
+      })
+    })
+  };
+  let upstreamUrl;
+  const response = await handleWorkerRequest(
+    new Request('https://documentation.preview.example.com/guide'),
+    environment,
+    {
+      fetchImpl: async url => {
+        upstreamUrl = url.toString();
+        return new Response('docs content');
+      }
+    }
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), 'docs content');
+  assert.equal(upstreamUrl, 'https://docs-project.vercel.app/guide');
+});
+
 test('requires Edge Access only for routes configured as required', async () => {
   const navigation = await handleWorkerRequest(
     new Request('https://data.example.com/guide?lang=zh', {
@@ -291,8 +400,16 @@ test('Edge Access required proxies after login without forwarding the Gateway se
 test('requires a signed handoff from the configured unified entry application', async () => {
   const entryAlias = 'portal-a7f3';
   const targetAlias = 'docs-a7f3';
-  const entryProject = requiredProject({ target: 'https://portal-project.vercel.app' });
+  const entryProject = requiredProject({
+    target: 'https://portal-project.vercel.app',
+    isUnifiedEntry: true,
+    semanticAlias: entryAlias,
+    hostnameAlias: entryAlias
+  });
   const targetProject = requiredProject({
+    isUnifiedEntry: false,
+    semanticAlias: targetAlias,
+    hostnameAlias: targetAlias,
     entryAccess: {
       mode: 'required',
       entryAlias,
@@ -593,6 +710,83 @@ test('requires a signed handoff from the configured unified entry application', 
     { fetchImpl, now: now + 901000 }
   );
   await assertConcealedResponse(expired);
+});
+
+test('allows a passwordless unified entry to issue signed handoffs', async () => {
+  const entryAlias = 'portal-a7f3';
+  const targetAlias = 'docs-a7f3';
+  const entryProject = project({
+    target: 'https://portal-project.vercel.app',
+    edgeAccess: { mode: 'disabled' },
+    isUnifiedEntry: true,
+    semanticAlias: entryAlias
+  });
+  const targetProject = project({
+    isUnifiedEntry: false,
+    semanticAlias: targetAlias,
+    hostnameAlias: targetAlias,
+    entryAccess: {
+      mode: 'required',
+      entryAlias,
+      ttlSeconds: 900
+    }
+  });
+  const environment = {
+    ...createEnvironment(),
+    ROUTE_BASE_DOMAIN: 'preview.example.com',
+    ROUTE_PROJECTS_JSON: JSON.stringify({
+      [entryAlias]: entryProject,
+      [targetAlias]: targetProject
+    })
+  };
+  const now = Date.UTC(2026, 7, 26);
+  const launch = await handleWorkerRequest(
+    new Request(
+      `https://preview.example.com/_edge-gateway/launch?${new URLSearchParams({
+        target: `${targetAlias}.preview.example.com`,
+        next: '/guide'
+      })}`,
+      {
+        headers: {
+          ...documentHeaders(),
+          'Sec-Fetch-Site': 'same-origin',
+          'Sec-Fetch-User': '?1'
+        }
+      }
+    ),
+    environment,
+    { now }
+  );
+
+  assert.equal(launch.status, 303);
+  assert.match(
+    launch.headers.get('location'),
+    new RegExp(`^https://${targetAlias}\\.preview\\.example\\.com/_edge-gateway/entry\\?`)
+  );
+
+  const accepted = await handleWorkerRequest(
+    new Request(launch.headers.get('location')),
+    environment,
+    {
+      now,
+      entryTicketRedeemer: async () => true
+    }
+  );
+  assert.equal(accepted.status, 303);
+  const entryGrant = readCookie(accepted.headers.get('set-cookie'), 'entry_session');
+
+  const proxied = await handleWorkerRequest(
+    new Request(`https://${targetAlias}.preview.example.com/guide`, {
+      headers: { Cookie: `entry_session=${entryGrant}` }
+    }),
+    environment,
+    {
+      now,
+      fetchImpl: async () => new Response('passwordless entry target')
+    }
+  );
+  assert.equal(proxied.status, 200);
+  assert.equal(await proxied.text(), 'passwordless entry target');
 });
 
 test('completes an upstream Access Gate login and logout flow with rewritten origins', async () => {

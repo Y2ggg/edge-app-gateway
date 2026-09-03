@@ -6,16 +6,16 @@
 | --- | --- | --- |
 | `ROUTE_PROJECTS_JSON` | 是 | 1–200 个应用组成的新协议 JSON 映射，生产环境建议存为 Secret |
 | `ROUTE_BASE_DOMAIN` | 多应用必需 | 仅域名，例如 `apps.example.com`，不含协议、端口、路径或通配符 |
-| `ROUTE_SESSION_SECRET` | 存在 Edge Access required 路由时必需 | 至少 32 个字符，用于密码 HMAC、alias 绑定的 Session 以及统一入口票据签名 |
+| `ROUTE_SESSION_SECRET` | 存在 Edge Access required 路由或 entryAccess required 关系时必需 | 至少 32 个字符，用于密码 HMAC、alias 绑定的 Session 以及统一入口票据签名 |
 | `ROUTE_SESSION_TTL_SECONDS` | 否 | 300–604800，默认 28800 秒 |
 | 路由中的 `secretBinding` | Origin Protection required 时必需 | Binding 名进入 JSON，Secret 值单独保存在 Cloudflare |
 | `EDGE_LOGIN_RATE_LIMITER` | 建议 | Wrangler 已配置为每 IP+alias 每分钟最多 5 次登录提交；另有 isolate 内失败计数兜底 |
 
 一个上游一个 Secret，不复用：例如 `ORIGIN_SECRET_PROJECT_A`、`ORIGIN_SECRET_PROJECT_B`。Secret 值不能进入 JSON、日志、响应、Git 或截图。
 
-本地 `tools/config-generator.html` 可同时维护 1–200 个应用。工具按“Gateway、应用、部署结果”三个步骤工作，应用列表中一次只展开一个编辑器。全局填写 Worker 名称与 `ROUTE_BASE_DOMAIN`，每个应用默认只填写 Alias 和 Vercel Production URL；点击唯一的“生成全部配置”后，工具统一校验所有应用并补齐需要的 Session Secret、passwordHash、Origin Secret、`alias.ROUTE_BASE_DOMAIN`、Binding、安全默认策略、完整路由表和逐项目 WAF Secret。导入只恢复编辑状态，不会静默生成或导出；生成器完全离线，不使用 localStorage、sessionStorage 或 IndexedDB。
+本地 `tools/config-generator.html` 可同时维护 1–200 个应用。工具按“Gateway、应用、部署结果”三个步骤工作，应用列表中一次只展开一个编辑器。每个应用都要明确选择“普通应用”或“统一入口应用”，并填写语义化别名；普通应用必须填写访问域名 Alias，统一入口应用的访问域名 Alias 可留空。点击唯一的“生成全部配置”后，工具统一校验所有应用并补齐需要的 Session Secret、passwordHash、Origin Secret、Custom Domain、Binding、安全默认策略、完整路由表和逐项目 WAF Secret；统一入口不填写访问域名 Alias 时，基础域名自动成为它的 Custom Domain。导入只恢复编辑状态，不会静默生成或导出；生成器完全离线，不使用 localStorage、sessionStorage 或 IndexedDB。
 
-工具导出的 `*.production.variables.json` 同时是敏感备份和 `deploy:config` 的输入，包含普通变量、完整路由表、Session Secret、所有 Origin Secret 和 Custom Domains。它可以保存在受控 WebDAV 目录，但 WebDAV 必须使用 HTTPS、独立凭据和严格访问控制；若服务端不是端到端加密，文件应额外加密。推荐通过系统挂载或同步客户端提供本地路径，生成器不直接保存 WebDAV 凭据或连接远端。默认部署流程从 `edge-app-gateway` 仓库根目录运行 `npm --prefix cloudflare-worker run deploy:config -- ../<文件名> --worker '<Worker 名>'`；生成器会输出校验、dry-run、正式部署和健康检查的完整命令，并保证命令中的 Worker 名与下载文件内容一致。
+工具导出的 `*.production.variables.json` 同时是敏感备份和 `deploy:config` 的输入，包含普通变量、完整路由表、Session Secret、所有 Origin Secret 和 Custom Domains。统一入口角色和访问域名 Alias 都直接写入路由表；统一入口不填写 Alias 时，裸基础域名（例如 `https://apps.example.com`）就是它的入口。它可以保存在受控 WebDAV 目录，但 WebDAV 必须使用 HTTPS、独立凭据和严格访问控制；若服务端不是端到端加密，文件应额外加密。推荐通过系统挂载或同步客户端提供本地路径，生成器不直接保存 WebDAV 凭据或连接远端。默认部署流程从 `edge-app-gateway` 仓库根目录运行 `npm --prefix cloudflare-worker run deploy:config -- ../<文件名> --worker '<Worker 名>'`；生成器会输出校验、dry-run、正式部署和健康检查的完整命令，并保证命令中的 Worker 名与下载文件内容一致。
 
 变量文件协议为版本化 JSON：
 
@@ -34,11 +34,13 @@
   },
   "secrets": {
     "ROUTE_PROJECTS_JSON": "<完整 JSON 字符串>",
-    "ROUTE_SESSION_SECRET": "<存在 Edge Access required 路由时存在>",
+    "ROUTE_SESSION_SECRET": "<存在 Edge Access required 路由或 entryAccess required 关系时存在>",
     "ORIGIN_SECRET_PORTAL": "<项目独立 Secret>"
   }
 }
 ```
+
+若要启用裸基础域名统一入口，在路由表中把入口应用标记为 `"isUnifiedEntry": true`，并省略它的 `hostnameAlias`；对应 `worker.customDomains` 必须包含 `apps.example.com`。
 
 `worker.name` 是正式部署的 Worker 目标，而不是仅用于显示的名称。命令必须显式提供相同的 `--worker`，不一致时部署脚本会拒绝继续。`worker.rateLimitNamespaceId` 是该 Worker 的账号级登录限流命名空间；不同逻辑 Worker 必须使用不同值，否则 Cloudflare 会共享相同 key 的限流计数。默认 Worker `lx-cm-route` 在从旧名称迁移时沿用 `1001`，其他名称由生成器稳定生成。部署脚本根据变量文件生成仅在本次命令中使用的私有临时 Wrangler 配置，完成或失败后都会删除。
 
@@ -49,6 +51,9 @@
 ```json
 {
   "data-app": {
+    "semanticAlias": "data-app",
+    "isUnifiedEntry": false,
+    "hostnameAlias": "data",
     "target": "https://data-app.vercel.app",
     "deliveryMode": "proxy",
     "proxyProfile": "fullstack",
@@ -81,13 +86,15 @@
 
 字段规则：
 
-- Alias 为 3–63 位小写字母、数字或短横线。多应用时，`alias.apps.example.com` 的 alias 必须存在于映射中。
+- 每个应用都有唯一的语义化别名（配置映射键）。`isUnifiedEntry` 必须明确区分普通应用（`false`）和统一入口应用（`true`）；普通应用必须配置 `hostnameAlias`，统一入口应用可选，省略时裸 `apps.example.com` 就是它的入口。
+- `semanticAlias` 与配置映射键保持一致，用于统一入口选择和票据绑定；`isUnifiedEntry=true` 明确标记统一入口应用，整份配置最多一个。
+- 普通应用的 `hostnameAlias` 必填；统一入口应用的 `hostnameAlias` 可选，填写后域名为 `hostnameAlias.apps.example.com`，留空则使用 `apps.example.com`。
 - `target` 必须是无凭据、查询和片段的 `https://*.vercel.app` URL，可包含固定基础路径。
 - `deliveryMode` 为 `proxy` 或显式 `redirect`。Edge Access disabled 不会自动改变该字段。
 - `proxyProfile` 为 `static` 或 `fullstack`。static 只能允许 GET、HEAD、OPTIONS；fullstack 可使用全部受支持方法。
 - `requestOriginPolicy` 可省略，默认 `preserve`。`rewrite-to-upstream` 只改写原本与用户自定义域名同源的 Origin/Referer，适用于按 Vercel Host 校验同源的上游 Access Gate。redirect 模式不能使用改写策略。
-- `edgeAccess.mode` 为 `disabled` 或 `required`。required 必须有 `edgeAccess.passwordHash`；disabled 时该字段不读取，也不需要 `ROUTE_SESSION_SECRET`。
-- `entryAccess` 可省略，默认 `{ "mode": "disabled" }`。`required` 必须提供另一个已配置应用的 `entryAlias`，以及可选的 `ttlSeconds`（300–86400，默认 1800）。目标与入口都必须使用 proxy；入口必须启用 Edge Access，且不能再依赖其他入口。
+- `edgeAccess.mode` 为 `disabled` 或 `required`。required 必须有 `edgeAccess.passwordHash`；disabled 时该字段不读取，也不会单独要求 `ROUTE_SESSION_SECRET`。若配置了 `entryAccess=required`，统一入口票据仍需要该 Secret。
+- `entryAccess` 可省略，默认 `{ "mode": "disabled" }`。`required` 必须提供另一个已配置统一入口应用的语义化别名 `entryAlias`，以及可选的 `ttlSeconds`（300–86400，默认 1800）。目标与入口都必须使用 proxy；入口不能再依赖其他入口。入口是否启用 Gateway 密码由入口自己的 `edgeAccess` 独立决定。
 - `originProtection.mode` 为 `disabled` 或 `required`。required 必须有安全的自定义 `x-` Header 名和大写 Binding 名 `secretBinding`；`x-vercel-protection-bypass` 被明确禁止。
 - `deliveryMode=redirect` 不能与 required 源站保护共存，而且只能允许 GET/HEAD。
 - `allowedMethods` 必须是非空、无重复的受支持方法数组。Worker 规范化 `Allow` 顺序。
@@ -121,11 +128,14 @@ npm run password:hash -- "访问密码" "ROUTE_SESSION_SECRET"
 
 ## 统一入口访问控制
 
-统一入口项目必须作为普通 proxy 应用接入 Gateway，并启用 `edgeAccess.mode=required`。受保护 Demo 的示例：
+统一入口项目必须作为 `deliveryMode=proxy` 的应用接入 Gateway；`edgeAccess.mode` 可按需选择 `required` 或 `disabled`，不影响它被其他应用引用为统一入口。受保护 Demo 的示例：
 
 ```json
 {
   "portal": {
+    "semanticAlias": "portal",
+    "isUnifiedEntry": true,
+    "hostnameAlias": "",
     "target": "https://portal-app.vercel.app",
     "deliveryMode": "proxy",
     "proxyProfile": "fullstack",
@@ -142,6 +152,9 @@ npm run password:hash -- "访问密码" "ROUTE_SESSION_SECRET"
     "cookieDomainPolicy": "strip"
   },
   "demo-app": {
+    "semanticAlias": "demo-app",
+    "isUnifiedEntry": false,
+    "hostnameAlias": "demo-app",
     "target": "https://demo-app.vercel.app",
     "deliveryMode": "proxy",
     "proxyProfile": "fullstack",
@@ -166,7 +179,7 @@ npm run password:hash -- "访问密码" "ROUTE_SESSION_SECRET"
 /_edge-gateway/launch?target=demo-app.apps.example.com&next=%2F
 ```
 
-Gateway 先验证入口 Host 的 `route_session` 和配置中的入口→目标关系。对提供 Fetch Metadata 的现代浏览器，launch 还必须是 `same-origin`、`navigate`、`document` 且带有真实用户激活标记 `Sec-Fetch-User: ?1`；地址栏直开、F12 fetch、无用户手势的脚本导航和跨站触发均被隐匿拒绝。对完全不提供 Fetch Metadata 的旧客户端，仅兼容同源 Referer；Referer 不作为现代浏览器的授权替代品。
+若入口启用了 `edgeAccess=required`，Gateway 先验证入口 Host 的 `route_session`；入口关闭 Edge Access 时跳过这一步，但两种模式都会继续验证配置中的入口→目标关系。对提供 Fetch Metadata 的现代浏览器，launch 还必须是 `same-origin`、`navigate`、`document` 且带有真实用户激活标记 `Sec-Fetch-User: ?1`；地址栏直开、F12 fetch、无用户手势的脚本导航和跨站触发均被隐匿拒绝。对完全不提供 Fetch Metadata 的旧客户端，仅兼容同源 Referer；Referer 不作为现代浏览器的授权替代品。
 
 校验通过后，Gateway 签发 30 秒的随机紧凑票据。票据正文不包含可解码的入口 Alias、目标 Alias、路径或用途；这些上下文与随机 nonce、过期时间共同参与 HMAC，因而票据不能跨入口、跨目标、跨路径或跨用途使用。目标 `/_edge-gateway/entry` 验票后通过 `ENTRY_TICKET_REDEEMER` Durable Object 原子消费票据；同一票据再次使用会得到隐匿 404。首次兑换会设置无 Domain 的 Host-only `entry_session`，有效期由目标的 `ttlSeconds` 决定。
 

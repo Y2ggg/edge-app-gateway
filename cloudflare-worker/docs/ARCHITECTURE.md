@@ -28,9 +28,9 @@ Cloudflare Worker 按 Host 解析 alias
 ## 统一入口信任链
 
 ```text
-已通过 Edge Access 的入口 Host
+符合可信导航约束的入口 Host（若启用 Edge Access，还需通过登录）
         ↓ 用户点击 GET /_edge-gateway/launch?target=<目标 Host>&next=<路径>
-验证同源用户导航 Fetch Metadata、入口 route_session 和入口→目标关系
+验证同源用户导航 Fetch Metadata、按需验证入口 route_session，并检查入口→目标关系
         ↓ 303，携带 30 秒随机、不透明 HMAC 票据
 目标 Host /_edge-gateway/entry
         ↓ 验证票据用途、入口 Alias、目标 Alias、目标路径、签名和过期时间
@@ -85,6 +85,8 @@ Gateway Session 只证明访问者通过该 alias 的边缘验证。上游应用
 ## 源码和生成包
 
 `src/worker.js` 是模块入口；配置和代理工具位于 `lib/`。Dashboard 部署使用生成的 `dashboard/worker.js`：
+
+只有路由表明确标记 `isUnifiedEntry=true` 的应用才是统一入口。该应用的 `hostnameAlias` 留空时，Worker 把精确的 `ROUTE_BASE_DOMAIN` Host 解析为它；填写 Alias 时只使用 `hostnameAlias.ROUTE_BASE_DOMAIN`。部署配置会按同样规则绑定 Custom Domain。
 
 ```bash
 npm run dashboard:build

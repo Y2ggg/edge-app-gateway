@@ -125,6 +125,82 @@ test('validates a multi-application variables file without logging secret values
   }
 });
 
+test('accepts the bare base domain for a unified entry without hostname Alias', async () => {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'edge-gateway-base-entry-'));
+  const configPath = join(temporaryDirectory, 'gateway.variables.json');
+  const variablesFile = createVariablesFile();
+  const projects = JSON.parse(variablesFile.secrets.ROUTE_PROJECTS_JSON);
+  projects.portal.edgeAccess = {
+    mode: 'required',
+    passwordHash: 'hmac-sha256$portal'
+  };
+  projects.portal.isUnifiedEntry = true;
+  projects.portal.semanticAlias = 'portal';
+  variablesFile.worker.customDomains = [
+    'preview.example.com'
+  ];
+  variablesFile.secrets.ROUTE_PROJECTS_JSON = JSON.stringify(projects);
+  variablesFile.secrets.ROUTE_SESSION_SECRET = '0123456789abcdef0123456789abcdef';
+
+  try {
+    await writeFile(configPath, JSON.stringify(variablesFile), { mode: 0o600 });
+    const result = spawnSync(process.execPath, deployArguments(configPath, '--check'), {
+      encoding: 'utf8'
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /preview\.example\.com/);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true });
+  }
+});
+
+test('accepts a passwordless unified entry with entryAccess and requires its signing secret', async () => {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'edge-gateway-passwordless-entry-'));
+  const configPath = join(temporaryDirectory, 'gateway.variables.json');
+  const variablesFile = createVariablesFile();
+  const projects = JSON.parse(variablesFile.secrets.ROUTE_PROJECTS_JSON);
+  projects.portal.isUnifiedEntry = true;
+  projects.portal.semanticAlias = 'portal';
+  projects.portal.edgeAccess = { mode: 'disabled' };
+  projects.demo = {
+    target: 'https://demo-app.vercel.app',
+    deliveryMode: 'proxy',
+    proxyProfile: 'fullstack',
+    requestOriginPolicy: 'rewrite-to-upstream',
+    edgeAccess: { mode: 'disabled' },
+    isUnifiedEntry: false,
+    semanticAlias: 'demo',
+    hostnameAlias: 'demo',
+    entryAccess: { mode: 'required', entryAlias: 'portal', ttlSeconds: 900 },
+    originProtection: { mode: 'disabled' },
+    allowedMethods: ['GET', 'HEAD', 'POST', 'OPTIONS'],
+    cachePolicy: 'assets-only',
+    cookieDomainPolicy: 'strip'
+  };
+  variablesFile.worker.customDomains = ['demo.preview.example.com', 'preview.example.com'];
+  variablesFile.secrets.ROUTE_PROJECTS_JSON = JSON.stringify(projects);
+  variablesFile.secrets.ROUTE_SESSION_SECRET = '0123456789abcdef0123456789abcdef';
+
+  try {
+    await writeFile(configPath, JSON.stringify(variablesFile), { mode: 0o600 });
+    const valid = spawnSync(process.execPath, deployArguments(configPath, '--check'), {
+      encoding: 'utf8'
+    });
+    assert.equal(valid.status, 0, valid.stderr);
+
+    delete variablesFile.secrets.ROUTE_SESSION_SECRET;
+    await writeFile(configPath, JSON.stringify(variablesFile), { mode: 0o600 });
+    const missingSecret = spawnSync(process.execPath, deployArguments(configPath, '--check'), {
+      encoding: 'utf8'
+    });
+    assert.equal(missingSecret.status, 1);
+    assert.match(missingSecret.stderr, /统一入口通行/);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true });
+  }
+});
+
 test('targets different Workers with isolated rate limiter namespaces', async () => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'edge-gateway-multi-worker-'));
   const existingPath = join(temporaryDirectory, 'existing.variables.json');

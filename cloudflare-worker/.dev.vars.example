@@ -1,7 +1,8 @@
 # 单应用且未设置 ROUTE_BASE_DOMAIN 时，Worker 自动使用唯一应用。
-ROUTE_PROJECTS_JSON={"example-a7f3":{"target":"https://your-project.vercel.app","deliveryMode":"proxy","proxyProfile":"fullstack","requestOriginPolicy":"rewrite-to-upstream","edgeAccess":{"mode":"disabled"},"entryAccess":{"mode":"disabled"},"originProtection":{"mode":"required","headerName":"x-edge-app-gateway-origin","secretBinding":"ORIGIN_SECRET_EXAMPLE"},"allowedMethods":["GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"],"cachePolicy":"assets-only","cookieDomainPolicy":"strip"}}
+# ordinary 应用必须明确填写 hostnameAlias；统一入口应用将 isUnifiedEntry 设为 true。
+ROUTE_PROJECTS_JSON={"example-a7f3":{"semanticAlias":"example-a7f3","isUnifiedEntry":false,"hostnameAlias":"example-a7f3","target":"https://your-project.vercel.app","deliveryMode":"proxy","proxyProfile":"fullstack","requestOriginPolicy":"rewrite-to-upstream","edgeAccess":{"mode":"disabled"},"entryAccess":{"mode":"disabled"},"originProtection":{"mode":"required","headerName":"x-edge-app-gateway-origin","secretBinding":"ORIGIN_SECRET_EXAMPLE"},"allowedMethods":["GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"],"cachePolicy":"assets-only","cookieDomainPolicy":"strip"}}
 
-# 仅 edgeAccess.mode=required 时需要；运行 `npm run session:secret` 生成。
+# edgeAccess.mode=required 或 entryAccess.mode=required 时需要；运行 `npm run session:secret` 生成。
 ROUTE_SESSION_SECRET=replace-with-at-least-32-random-characters
 ROUTE_SESSION_TTL_SECONDS=28800
 
@@ -10,3 +11,4 @@ ORIGIN_SECRET_EXAMPLE=replace-with-a-random-per-project-origin-secret
 
 # 多子域模式才需要；单项目本地测试时不要设置。
 # ROUTE_BASE_DOMAIN=preview.example.com
+# 统一入口应用由 ROUTE_PROJECTS_JSON 中的 isUnifiedEntry=true 标记；hostnameAlias 留空时直接使用基础域名。

@@ -182,7 +182,7 @@
           <div class="field">
             <label for="base-domain">多应用基础域名</label>
             <input id="base-domain" type="text" placeholder="preview.example.com" autocomplete="off">
-            <small>应用入口自动组成 <code>alias.基础域名</code>。</small>
+            <small>普通应用使用 <code>Alias.基础域名</code>；统一入口应用的访问域名 Alias 留空时直接使用此基础域名。</small>
           </div>
         </div>
 
@@ -201,7 +201,7 @@
             <div class="field">
               <label for="session-secret">ROUTE_SESSION_SECRET（可留空）</label>
               <input id="session-secret" type="password" autocomplete="off">
-              <small>仅 Edge 登录需要；“生成全部配置”时会自动补齐。</small>
+              <small>Edge 登录或统一入口通行需要；“生成全部配置”时会自动补齐。</small>
             </div>
           </div>
           <p class="status" id="session-secret-status" role="status"></p>
@@ -232,6 +232,9 @@
             <p>左侧选择应用，右侧只编辑当前应用；安全密钥会在最后统一生成。</p>
           </div>
         </div>
+        <div class="callout">
+          先为每个应用填写“语义化别名”，再明确选择应用角色：普通应用（<code>isUnifiedEntry=false</code>）必须填写访问域名 Alias；统一入口应用（<code>isUnifiedEntry=true</code>）的 Alias 可留空，留空时直接使用多应用基础域名。普通应用是否受入口管控，再单独在“是否必须从统一入口进入”中选择。
+        </div>
 
         <div class="app-workspace">
           <aside class="project-sidebar" aria-label="应用列表">
@@ -260,16 +263,29 @@
           </div>
           <div class="grid">
             <div class="field">
-              <label>应用 Alias</label>
+              <label>应用语义化别名</label>
+              <input data-field="semantic-alias" type="text" placeholder="portal" autocomplete="off">
+              <small>用于识别应用，以及让受控普通应用选择统一入口；3–63 位小写字母、数字或短横线。</small>
+            </div>
+            <div class="field">
+              <label>应用角色</label>
+              <select data-field="application-role">
+                <option value="ordinary">普通应用</option>
+                <option value="entry">统一入口应用</option>
+              </select>
+              <small>普通应用可不受限制，也可设置“必须从统一入口进入”；统一入口应用只能有一个，且必须使用反向代理。Gateway 密码登录可按需独立开启。</small>
+            </div>
+            <div class="field">
+              <label>访问域名 Alias</label>
               <input data-field="alias" type="text" placeholder="smartdata" autocomplete="off">
-              <small>3–63 位小写字母、数字或短横线。</small>
+              <small data-role="alias-help">普通应用必填，最终域名为 <code>Alias.基础域名</code>；统一入口应用可留空。</small>
             </div>
             <div class="field">
               <label>Vercel Production URL</label>
               <input data-field="target" type="url" placeholder="https://project-name.vercel.app" autocomplete="off">
             </div>
           </div>
-          <div class="domain-preview">访问域名：<code data-role="hostname">等待填写 Alias 和基础域名</code></div>
+          <div class="domain-preview">访问域名：<code data-role="hostname">等待填写应用信息和基础域名</code></div>
           <div class="field">
             <label>Gateway 是否增加一层密码登录</label>
             <select data-field="edge-access">
@@ -293,13 +309,16 @@
               <option value="disabled">不限制进入方式</option>
               <option value="required">必须从统一入口点击进入</option>
             </select>
+            <small>这是访问限制开关，不代表应用角色：上方“应用角色”单独决定它是不是统一入口应用。</small>
           </div>
           <div data-role="entry-fields" hidden>
             <div class="grid">
               <div class="field">
-                <label>统一入口 Alias</label>
-                <input data-field="entry-alias" type="text" placeholder="portal" autocomplete="off">
-                <small>必须引用本配置中的另一个应用；该入口必须启用 Gateway 密码登录。</small>
+                <label>统一入口语义化别名</label>
+                <select data-field="entry-alias">
+                  <option value="">请先配置统一入口应用</option>
+                </select>
+                <small>只显示本配置中角色为“统一入口应用”的语义化别名；修改应用角色或别名后会自动刷新。</small>
               </div>
               <div class="field">
                 <label>入口通行有效期（秒）</label>

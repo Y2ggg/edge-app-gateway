@@ -33,6 +33,15 @@ test('builds multiple applications with per-project secrets and domains', () => 
   assert.match(generatorScript, /bindingOwners\.has/);
 });
 
+test('supports routing the bare base domain to the unified entry application', () => {
+  assert.match(generatorHtml, /data-field="application-role"/);
+  assert.match(generatorHtml, /data-field="semantic-alias"/);
+  assert.match(generatorHtml, /统一入口应用可留空/);
+  assert.match(generatorScript, /isUnifiedEntry/);
+  assert.match(generatorScript, /return baseDomain/);
+  assert.match(generatorScript, /hostname === baseDomain/);
+});
+
 test('derives and exports an isolated rate limiter namespace per Worker', () => {
   assert.match(generatorHtml, /id="rate-limit-namespace-id"[^>]*readonly/);
   assert.match(generatorHtml, /不同 Worker 使用不同账号级计数空间/);
@@ -45,16 +54,20 @@ test('derives and exports an isolated rate limiter namespace per Worker', () => 
 test('configures signed unified-entry access and produces launch links', () => {
   assert.match(generatorHtml, /data-field="entry-access"/);
   assert.match(generatorHtml, /data-field="entry-alias"/);
+  assert.match(generatorHtml, /<select data-field="entry-alias">/);
+  assert.doesNotMatch(generatorHtml, /<input data-field="entry-alias"/);
   assert.match(generatorHtml, /data-field="entry-ttl"/);
   assert.match(generatorHtml, /不依赖可伪造的 Referer/);
   assert.match(generatorHtml, /data-result-tab="entry"/);
   assert.match(generatorHtml, /id="entry-launch-output"/);
   assert.match(generatorScript, /function syncProjectEntryFields/);
+  assert.match(generatorScript, /function refreshUnifiedEntrySelectors/);
   assert.match(generatorScript, /function validateEntryAccessRelationships/);
   assert.match(generatorScript, /entryAccess,/);
   assert.match(generatorScript, /\/_edge-gateway\/launch/);
   assert.match(generatorScript, /launchUrl\.searchParams\.set\('target'/);
-  assert.match(generatorScript, /统一入口.*必须启用 Gateway 密码登录/);
+  assert.match(generatorScript, /统一入口应用.*必须使用反向代理/);
+  assert.doesNotMatch(generatorScript, /统一入口.*必须启用 Gateway 密码登录/);
   assert.match(generatorScript, /project\.entryAccess\.mode !== 'required'/);
   assert.match(generatorHtml, /受限 Demo 的健康接口会隐匿为 404/);
 });

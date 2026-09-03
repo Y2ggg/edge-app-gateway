@@ -6,6 +6,7 @@
 
 - `edgeAccess`：是否由 Gateway 验证访问者；`disabled` 仍然走 Worker 代理。
 - `entryAccess`：是否只接受指定统一入口签发的短时通行；直接访问受限 Demo 返回无标识 404。
+- `isUnifiedEntry`：明确标记统一入口应用；该应用的 `hostnameAlias` 可留空，留空时直接使用基础域名作为入口。
 - `originProtection`：是否注入 Vercel WAF 校验的项目独立密钥。
 - `proxyProfile`：声明静态或全栈代理能力。
 - Application Access：完全由上游应用管理，不写入 Gateway 路由表。
@@ -21,7 +22,7 @@
 - 仅上游连接失败的浏览器文档导航显示不可用页面；业务 4xx/5xx 原样返回。
 - `assets-only` 只允许无认证静态资源缓存，API、NDJSON、SSE、登录和会话一律 `no-store`。
 - 生产 Wrangler 配置关闭 `workers.dev` 和 Preview URL。
-- 统一入口 GET launch 只接受已登录入口发起的同源用户导航；30 秒 handoff ticket 绑定目标路径，并由 Durable Object 原子限制为单次兑换。
+- 统一入口 GET launch 只接受符合可信导航约束的入口用户导航；入口启用 Edge Access 时还需已登录，30 秒 handoff ticket 绑定目标路径，并由 Durable Object 原子限制为单次兑换。
 
 ## 目录
 

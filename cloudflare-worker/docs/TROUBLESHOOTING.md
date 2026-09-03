@@ -14,11 +14,13 @@ https://项目域名/_edge-gateway/health
 
 - `ROUTE_PROJECTS_JSON` 是否使用新协议，是否仍残留旧顶层 `passwordHash`/`rewriteOrigins`。
 - `edgeAccess=required` 是否有 passwordHash 和有效的 `ROUTE_SESSION_SECRET`。
+- 若存在 `entryAccess=required`，即使统一入口关闭 Edge Access，也必须配置有效的 `ROUTE_SESSION_SECRET` 用于签发票据。
 - `originProtection=required` 的 `secretBinding` 是否与 Cloudflare Secret Binding 名完全一致，值是否至少 16 个字符。
 - 上游按 Host 校验 Origin 时，是否设置 `requestOriginPolicy: rewrite-to-upstream`。
 - redirect 是否错误搭配 required 源站保护或写方法。
 - 多应用的 `ROUTE_BASE_DOMAIN`、Custom Domain 前缀和 alias 是否一致。
-- `entryAccess=required` 的入口 Alias 是否存在，入口与目标是否都为 proxy，入口是否启用了 Edge Access 且没有依赖另一入口。
+- 若访问裸基础域名，确认已有应用被标记为“统一入口应用”、且它的访问域名 Alias 留空，并在 Custom Domains 中绑定裸基础域名；否则该 Host 按预期返回 404。
+- `entryAccess=required` 的入口 Alias 是否存在，入口与目标是否都为 proxy，入口是否标记为统一入口且没有依赖另一入口；入口是否启用 Edge Access 不影响统一入口关系。
 
 日志只应出现错误类别，不能打印 JSON、Binding 名、密码、Hash、Session 或 Secret 值。
 

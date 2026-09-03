@@ -38,7 +38,7 @@ npm run deploy:check
 
 ## 2. 准备配置和密钥
 
-1. 运行 `npm run session:secret` 生成 `ROUTE_SESSION_SECRET`。只有存在 Edge Access required 路由时才需要。
+1. 运行 `npm run session:secret` 生成 `ROUTE_SESSION_SECRET`。存在 Edge Access required 路由或 `entryAccess=required` 关系时都需要。
 2. 为每个 required Edge Access 路由生成独立访问密码散列：
 
    ```bash
@@ -47,7 +47,7 @@ npm run deploy:check
 
 3. 为每个 Vercel 项目分别生成至少 32 个随机字符的 Origin Secret，禁止复用。
 4. 按[配置协议](./CONFIGURATION.md)准备完整 `ROUTE_PROJECTS_JSON`。配置只能写 Binding 名，不能写 Origin Secret 值。
-5. 在本地打开 `tools/config-generator.html`，填写 Worker 名称、统一基础域名，并在应用列表中同时维护 1–200 个项目。每个项目默认只需 Alias 和 Vercel Production URL；工具自动生成 Custom Domain、Binding、Origin Secret、完整路由表及 Vercel WAF 清单。
+5. 在本地打开 `tools/config-generator.html`，填写 Worker 名称、多应用基础域名，并在应用列表中同时维护 1–200 个项目。每个应用都要明确选择“普通应用”或“统一入口应用”，填写语义化别名；普通应用必须填写访问域名 Alias，统一入口应用可留空（留空即使用裸基础域名）。工具会把基础域名与各应用 Custom Domain 一并生成，并自动生成 Binding、Origin Secret、完整路由表及 Vercel WAF 清单。
 6. 导出 `*.production.variables.json`。这是包含全部生产 Secret 的敏感备份和 CLI 部署输入，不得提交 Git。可存入密码保险库、加密磁盘，或通过 WebDAV 客户端同步到使用 HTTPS 和独立账号保护的私有目录。生成器本身保持离线，不直接连接 WebDAV。
 
 示例仅使用占位符：

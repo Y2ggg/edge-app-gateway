@@ -254,6 +254,24 @@ var RouteConfigurationError = class extends Error {
 function isValidRouteAlias(alias) {
   return typeof alias === "string" && ROUTE_ALIAS_PATTERN.test(alias);
 }
+function resolveUnifiedEntryAlias(projects) {
+  if (!(projects instanceof Map)) {
+    throw new RouteConfigurationError("Projects must be a Map");
+  }
+  const entries = [...projects].filter(([, project2]) => project2.isUnifiedEntry === true);
+  if (entries.length > 1) {
+    throw new RouteConfigurationError("\u53EA\u80FD\u914D\u7F6E\u4E00\u4E2A\u7EDF\u4E00\u5165\u53E3\u5E94\u7528");
+  }
+  const [semanticAlias, project] = entries[0] || [];
+  return project ? semanticAlias : "";
+}
+function getProjectHostnameAlias(semanticAlias, project) {
+  if (project && Object.prototype.hasOwnProperty.call(project, "hostnameAlias")) {
+    return project.hostnameAlias;
+  }
+  if (project?.isUnifiedEntry === true) return "";
+  return project?.isUnifiedEntry === void 0 ? semanticAlias : "";
+}
 function parseRouteProjects(rawConfig) {
   if (typeof rawConfig !== "string" || rawConfig.length === 0) {
     throw new RouteConfigurationError("ROUTE_PROJECTS_JSON is missing");
@@ -275,6 +293,7 @@ function parseRouteProjects(rawConfig) {
   for (const [alias, rawProject] of entries) {
     projects.set(alias, parseProject(alias, rawProject));
   }
+  validateProjectIdentity(projects);
   validateEntryAccessRelationships(projects);
   return projects;
 }
@@ -286,6 +305,17 @@ function parseProject(alias, project) {
     throw new RouteConfigurationError(`Application ${alias} must be an object`);
   }
   const target = parseTarget(alias, project.target);
+  const isUnifiedEntry = project.isUnifiedEntry === true;
+  if (project.isUnifiedEntry !== void 0 && typeof project.isUnifiedEntry !== "boolean") {
+    throw new RouteConfigurationError(`Application ${alias} isUnifiedEntry must be boolean`);
+  }
+  const hostnameAlias = project.hostnameAlias === void 0 ? "" : project.hostnameAlias;
+  if (typeof hostnameAlias !== "string") {
+    throw new RouteConfigurationError(`Application ${alias} hostnameAlias must be a string`);
+  }
+  if (hostnameAlias && !isValidRouteAlias(hostnameAlias)) {
+    throw new RouteConfigurationError(`Application ${alias} hostnameAlias must be a valid route alias`);
+  }
   const deliveryMode = requireEnum(alias, "deliveryMode", project.deliveryMode, ["proxy", "redirect"]);
   const proxyProfile = requireEnum(alias, "proxyProfile", project.proxyProfile, ["static", "fullstack"]);
   const requestOriginPolicy = project.requestOriginPolicy === void 0 ? "preserve" : requireEnum(
@@ -315,7 +345,7 @@ function parseProject(alias, project) {
       `Application ${alias} redirect mode only supports GET and HEAD`
     );
   }
-  return Object.freeze({
+  const normalized = {
     target,
     deliveryMode,
     proxyProfile,
@@ -326,7 +356,55 @@ function parseProject(alias, project) {
     allowedMethods,
     cachePolicy,
     cookieDomainPolicy
-  });
+  };
+  if (project.isUnifiedEntry !== void 0) normalized.isUnifiedEntry = isUnifiedEntry;
+  if (project.hostnameAlias !== void 0) normalized.hostnameAlias = hostnameAlias;
+  if (project.semanticAlias !== void 0) {
+    if (project.semanticAlias !== alias || !isValidRouteAlias(project.semanticAlias)) {
+      throw new RouteConfigurationError(`Application ${alias} semanticAlias must match its route key`);
+    }
+    normalized.semanticAlias = project.semanticAlias;
+  }
+  return Object.freeze(normalized);
+}
+function validateProjectIdentity(projects) {
+  const unifiedEntries = [];
+  const hostnameOwners = /* @__PURE__ */ new Map();
+  for (const [semanticAlias, project] of projects) {
+    const isUnifiedEntry = project.isUnifiedEntry === true;
+    const hostnameAlias = getProjectHostnameAlias(semanticAlias, project);
+    if (!isValidRouteAlias(semanticAlias)) {
+      throw new RouteConfigurationError(`Application ${semanticAlias} semanticAlias is invalid`);
+    }
+    if (isUnifiedEntry) unifiedEntries.push(semanticAlias);
+    if (!isUnifiedEntry && project.isUnifiedEntry === false && !hostnameAlias) {
+      throw new RouteConfigurationError(
+        `Application ${semanticAlias} requires an alias unless it is the unified entry application`
+      );
+    }
+    if (isUnifiedEntry && project.entryAccess.mode !== "disabled") {
+      throw new RouteConfigurationError(
+        `Unified entry application ${semanticAlias} cannot require another entry application`
+      );
+    }
+    if (isUnifiedEntry && project.deliveryMode !== "proxy") {
+      throw new RouteConfigurationError(
+        `Unified entry application ${semanticAlias} must use proxy delivery`
+      );
+    }
+    if (hostnameAlias) {
+      const existingOwner = hostnameOwners.get(hostnameAlias);
+      if (existingOwner && existingOwner !== semanticAlias) {
+        throw new RouteConfigurationError(
+          `Applications ${existingOwner} and ${semanticAlias} cannot use the same hostname alias ${hostnameAlias}`
+        );
+      }
+      hostnameOwners.set(hostnameAlias, semanticAlias);
+    }
+  }
+  if (unifiedEntries.length > 1) {
+    throw new RouteConfigurationError("\u53EA\u80FD\u914D\u7F6E\u4E00\u4E2A\u7EDF\u4E00\u5165\u53E3\u5E94\u7528");
+  }
 }
 function parseEntryAccess(alias, entryAccess) {
   if (entryAccess === void 0) {
@@ -367,9 +445,9 @@ function validateEntryAccessRelationships(projects) {
         `Application ${alias} and its entry application must use proxy delivery`
       );
     }
-    if (entryProject.edgeAccess.mode !== "required") {
+    if (entryProject.isUnifiedEntry !== true) {
       throw new RouteConfigurationError(
-        `Entry application ${project.entryAccess.entryAlias} must require Edge Access`
+        `Entry application ${project.entryAccess.entryAlias} must be marked as the unified entry application`
       );
     }
     if (entryProject.entryAccess.mode !== "disabled") {
@@ -900,15 +978,17 @@ async function handleGatewayRequest(request, url, alias, project, env, options) 
   return gatewayError("EDGE_GATEWAY_ENDPOINT_NOT_FOUND", "\u7F51\u5173\u63A5\u53E3\u4E0D\u5B58\u5728", 404);
 }
 async function createEntryHandoffResponse(request, url, alias, project, env, options) {
-  if (!alias || !project || project.entryAccess.mode !== "disabled" || project.edgeAccess.mode !== "required" || !isTrustedEntryLaunch(request, url)) {
+  if (!alias || !project || project.entryAccess.mode !== "disabled" || !isTrustedEntryLaunch(request, url)) {
     return entryConcealmentResponse(request);
   }
-  const authenticated = await verifyGatewaySession(request, alias, env, options.now);
-  if (authenticated === null) {
-    return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
-  }
-  if (!authenticated) {
-    return entryConcealmentResponse(request);
+  if (project.edgeAccess.mode === "required") {
+    const authenticated = await verifyGatewaySession(request, alias, env, options.now);
+    if (authenticated === null) {
+      return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
+    }
+    if (!authenticated) {
+      return entryConcealmentResponse(request);
+    }
   }
   const targetAlias = resolveEntryTargetAlias(
     url.searchParams.get("target"),
@@ -929,7 +1009,9 @@ async function createEntryHandoffResponse(request, url, alias, project, env, opt
     });
     const baseDomain = normalizeBaseDomain(env.ROUTE_BASE_DOMAIN);
     if (!baseDomain) throw new TypeError("Entry handoff requires ROUTE_BASE_DOMAIN");
-    acceptUrl = new URL(ENTRY_ACCEPT_PATH, `https://${targetAlias}.${baseDomain}`);
+    const targetHostnameAlias = getProjectHostnameAlias(targetAlias, targetProject);
+    const targetHostname = targetHostnameAlias ? `${targetHostnameAlias}.${baseDomain}` : baseDomain;
+    acceptUrl = new URL(ENTRY_ACCEPT_PATH, `https://${targetHostname}`);
   } catch (error) {
     console.error("Worker entry handoff configuration is invalid:", error.name);
     return gatewayError("EDGE_CONFIGURATION_ERROR", "\u7F51\u5173\u914D\u7F6E\u6682\u65F6\u4E0D\u53EF\u7528", 503);
@@ -1249,9 +1331,20 @@ function resolveWorkerAlias(hostname, env, projects) {
   const host = hostname.toLowerCase();
   const baseDomain = normalizeBaseDomain(env.ROUTE_BASE_DOMAIN);
   if (baseDomain) {
+    if (host === baseDomain) {
+      const semanticAlias = resolveUnifiedEntryAlias(projects);
+      const project = semanticAlias ? projects.get(semanticAlias) : null;
+      return project && !getProjectHostnameAlias(semanticAlias, project) ? semanticAlias : null;
+    }
     if (host.endsWith(`.${baseDomain}`)) {
-      const alias = host.slice(0, -(baseDomain.length + 1));
-      return isValidRouteAlias(alias) ? alias : null;
+      const hostnameAlias = host.slice(0, -(baseDomain.length + 1));
+      if (!isValidRouteAlias(hostnameAlias)) return null;
+      for (const [semanticAlias, project] of projects) {
+        if (getProjectHostnameAlias(semanticAlias, project) === hostnameAlias) {
+          return semanticAlias;
+        }
+      }
+      return null;
     }
     return null;
   }
@@ -1285,8 +1378,14 @@ function resolveEntryTargetAlias(rawTarget, env, projects) {
     return null;
   }
   if (!baseDomain || !value.endsWith(`.${baseDomain}`)) return null;
-  const alias = value.slice(0, -(baseDomain.length + 1));
-  return isValidRouteAlias(alias) && projects.has(alias) ? alias : null;
+  const hostnameAlias = value.slice(0, -(baseDomain.length + 1));
+  if (!isValidRouteAlias(hostnameAlias)) return null;
+  for (const [semanticAlias, project] of projects) {
+    if (getProjectHostnameAlias(semanticAlias, project) === hostnameAlias) {
+      return semanticAlias;
+    }
+  }
+  return null;
 }
 function loginResponse(url, options = {}) {
   const showError = options.showError || url.searchParams.get("error") === "unavailable";

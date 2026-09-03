@@ -8,7 +8,12 @@ import {
   rewriteSetCookieDomain,
   sanitizeNextPath
 } from '../lib/proxy-utils.js';
-import { isValidRouteAlias, parseRouteProjects } from '../lib/route-config.js';
+import {
+  getProjectHostnameAlias,
+  isValidRouteAlias,
+  parseRouteProjects,
+  resolveUnifiedEntryAlias
+} from '../lib/route-config.js';
 import {
   createEntryHandoffToken,
   createEntrySessionToken,
@@ -225,18 +230,19 @@ async function createEntryHandoffResponse(request, url, alias, project, env, opt
     !alias ||
     !project ||
     project.entryAccess.mode !== 'disabled' ||
-    project.edgeAccess.mode !== 'required' ||
     !isTrustedEntryLaunch(request, url)
   ) {
     return entryConcealmentResponse(request);
   }
 
-  const authenticated = await verifyGatewaySession(request, alias, env, options.now);
-  if (authenticated === null) {
-    return gatewayError('EDGE_CONFIGURATION_ERROR', '网关配置暂时不可用', 503);
-  }
-  if (!authenticated) {
-    return entryConcealmentResponse(request);
+  if (project.edgeAccess.mode === 'required') {
+    const authenticated = await verifyGatewaySession(request, alias, env, options.now);
+    if (authenticated === null) {
+      return gatewayError('EDGE_CONFIGURATION_ERROR', '网关配置暂时不可用', 503);
+    }
+    if (!authenticated) {
+      return entryConcealmentResponse(request);
+    }
   }
 
   const targetAlias = resolveEntryTargetAlias(
@@ -265,7 +271,11 @@ async function createEntryHandoffResponse(request, url, alias, project, env, opt
     });
     const baseDomain = normalizeBaseDomain(env.ROUTE_BASE_DOMAIN);
     if (!baseDomain) throw new TypeError('Entry handoff requires ROUTE_BASE_DOMAIN');
-    acceptUrl = new URL(ENTRY_ACCEPT_PATH, `https://${targetAlias}.${baseDomain}`);
+    const targetHostnameAlias = getProjectHostnameAlias(targetAlias, targetProject);
+    const targetHostname = targetHostnameAlias
+      ? `${targetHostnameAlias}.${baseDomain}`
+      : baseDomain;
+    acceptUrl = new URL(ENTRY_ACCEPT_PATH, `https://${targetHostname}`);
   } catch (error) {
     console.error('Worker entry handoff configuration is invalid:', error.name);
     return gatewayError('EDGE_CONFIGURATION_ERROR', '网关配置暂时不可用', 503);
@@ -670,9 +680,23 @@ function resolveWorkerAlias(hostname, env, projects) {
   const baseDomain = normalizeBaseDomain(env.ROUTE_BASE_DOMAIN);
 
   if (baseDomain) {
+    if (host === baseDomain) {
+      const semanticAlias = resolveUnifiedEntryAlias(projects);
+      const project = semanticAlias ? projects.get(semanticAlias) : null;
+      return project && !getProjectHostnameAlias(semanticAlias, project)
+        ? semanticAlias
+        : null;
+    }
+
     if (host.endsWith(`.${baseDomain}`)) {
-      const alias = host.slice(0, -(baseDomain.length + 1));
-      return isValidRouteAlias(alias) ? alias : null;
+      const hostnameAlias = host.slice(0, -(baseDomain.length + 1));
+      if (!isValidRouteAlias(hostnameAlias)) return null;
+      for (const [semanticAlias, project] of projects) {
+        if (getProjectHostnameAlias(semanticAlias, project) === hostnameAlias) {
+          return semanticAlias;
+        }
+      }
+      return null;
     }
 
     return null;
@@ -718,8 +742,14 @@ function resolveEntryTargetAlias(rawTarget, env, projects) {
   }
 
   if (!baseDomain || !value.endsWith(`.${baseDomain}`)) return null;
-  const alias = value.slice(0, -(baseDomain.length + 1));
-  return isValidRouteAlias(alias) && projects.has(alias) ? alias : null;
+  const hostnameAlias = value.slice(0, -(baseDomain.length + 1));
+  if (!isValidRouteAlias(hostnameAlias)) return null;
+  for (const [semanticAlias, project] of projects) {
+    if (getProjectHostnameAlias(semanticAlias, project) === hostnameAlias) {
+      return semanticAlias;
+    }
+  }
+  return null;
 }
 
 function loginResponse(url, options = {}) {

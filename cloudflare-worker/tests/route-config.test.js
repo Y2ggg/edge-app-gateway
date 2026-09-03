@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   isValidRouteAlias,
   parseRouteProjects,
+  resolveUnifiedEntryAlias,
   RouteConfigurationError
 } from '../lib/route-config.js';
 
@@ -76,10 +77,13 @@ test('validates entry-only access relationships and defaults', () => {
   const projects = parseRouteProjects(JSON.stringify({
     'portal-a7f3': fullstackProject({
       target: 'https://portal.vercel.app',
-      edgeAccess: { mode: 'required', passwordHash: 'hmac-sha256$portal' }
+      edgeAccess: { mode: 'required', passwordHash: 'hmac-sha256$portal' },
+      isUnifiedEntry: true,
+      semanticAlias: 'portal-a7f3'
     }),
     'project-a7f3': fullstackProject({
-      entryAccess: { mode: 'required', entryAlias: 'portal-a7f3', ttlSeconds: 900 }
+      entryAccess: { mode: 'required', entryAlias: 'portal-a7f3', ttlSeconds: 900 },
+      semanticAlias: 'project-a7f3'
     })
   }));
 
@@ -107,6 +111,76 @@ test('validates entry-only access relationships and defaults', () => {
       'project-a7f3': fullstackProject(projectOverrides)
     })), RouteConfigurationError);
   }
+});
+
+test('resolves the explicitly marked unified entry application', () => {
+  const projects = parseRouteProjects(JSON.stringify({
+    portal: fullstackProject({
+      target: 'https://portal.vercel.app',
+      edgeAccess: { mode: 'required', passwordHash: 'hmac-sha256$portal' },
+      isUnifiedEntry: true,
+      semanticAlias: 'portal'
+    }),
+    demo: fullstackProject({
+      target: 'https://demo.vercel.app',
+      entryAccess: { mode: 'required', entryAlias: 'portal' },
+      semanticAlias: 'demo'
+    })
+  }));
+
+  assert.equal(resolveUnifiedEntryAlias(projects), 'portal');
+});
+
+test('allows a unified entry without Gateway password access', () => {
+  const projects = parseRouteProjects(JSON.stringify({
+    portal: fullstackProject({
+      target: 'https://portal.vercel.app',
+      edgeAccess: { mode: 'disabled' },
+      isUnifiedEntry: true,
+      semanticAlias: 'portal'
+    }),
+    demo: fullstackProject({
+      target: 'https://demo.vercel.app',
+      entryAccess: { mode: 'required', entryAlias: 'portal' },
+      semanticAlias: 'demo',
+      isUnifiedEntry: false,
+      hostnameAlias: 'demo'
+    })
+  }));
+
+  assert.equal(projects.get('portal').edgeAccess.mode, 'disabled');
+  assert.equal(projects.get('demo').entryAccess.entryAlias, 'portal');
+});
+
+test('keeps semantic and hostname aliases independent for ordinary applications', () => {
+  const projects = parseRouteProjects(JSON.stringify({
+    docs: fullstackProject({
+      semanticAlias: 'docs',
+      isUnifiedEntry: false,
+      hostnameAlias: 'documentation'
+    })
+  }));
+
+  assert.equal(projects.get('docs').semanticAlias, 'docs');
+  assert.equal(projects.get('docs').hostnameAlias, 'documentation');
+  assert.throws(() => parseRouteProjects(JSON.stringify({
+    docs: fullstackProject({
+      semanticAlias: 'docs',
+      isUnifiedEntry: false
+    })
+  })), /requires an alias/);
+  assert.throws(() => parseRouteProjects(JSON.stringify({
+    docs: fullstackProject({
+      semanticAlias: 'docs',
+      isUnifiedEntry: false,
+      hostnameAlias: 'shared'
+    }),
+    guide: fullstackProject({
+      semanticAlias: 'guide',
+      isUnifiedEntry: false,
+      hostnameAlias: 'shared'
+    })
+  })), /same hostname alias/);
 });
 
 test('defaults to preserving request origins and validates explicit rewrite policy', () => {

@@ -2,7 +2,11 @@ import { spawn } from 'node:child_process';
 import { access, readFile, rm, stat } from 'node:fs/promises';
 import { basename, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseRouteProjects } from '../lib/route-config.js';
+import {
+  getProjectHostnameAlias,
+  parseRouteProjects,
+  resolveUnifiedEntryAlias
+} from '../lib/route-config.js';
 import {
   createWorkerInstanceConfig,
   resolveRateLimitNamespaceId
@@ -235,14 +239,17 @@ function validateVariablesFile(value) {
 
   const variableEntries = Object.entries(vars);
   if (
+    variableEntries.length < 2 ||
     variableEntries.length !== ALLOWED_VARIABLES.size ||
     variableEntries.some(([name, variableValue]) => (
       !ALLOWED_VARIABLES.has(name) || typeof variableValue !== 'string'
-    ))
+    )) ||
+    typeof vars.ROUTE_BASE_DOMAIN !== 'string' ||
+    typeof vars.ROUTE_SESSION_TTL_SECONDS !== 'string'
   ) {
     throw new CliError(
       'INVALID_CONFIG',
-      'vars 只能包含 ROUTE_BASE_DOMAIN 和 ROUTE_SESSION_TTL_SECONDS 字符串。'
+      'vars 必须只包含 ROUTE_BASE_DOMAIN 和 ROUTE_SESSION_TTL_SECONDS 字符串。'
     );
   }
 
@@ -277,7 +284,9 @@ function validateVariablesFile(value) {
   const originBindingOwners = new Map();
 
   for (const [alias, project] of projects) {
-    if (project.edgeAccess.mode === 'required') needsSessionSecret = true;
+    if (project.edgeAccess.mode === 'required' || project.entryAccess.mode === 'required') {
+      needsSessionSecret = true;
+    }
     if (project.originProtection.mode === 'required') {
       const secretBinding = project.originProtection.secretBinding;
       const existingOwner = originBindingOwners.get(secretBinding);
@@ -298,14 +307,29 @@ function validateVariablesFile(value) {
   if (needsSessionSecret && String(secrets.ROUTE_SESSION_SECRET || '').length < 32) {
     throw new CliError(
       'SECRET_MISSING',
-      '启用 Edge Access 时必须提供有效的 ROUTE_SESSION_SECRET。'
+      '启用 Edge Access 或统一入口通行时必须提供有效的 ROUTE_SESSION_SECRET。'
     );
   }
 
-  const expectedDomains = [...projects.keys()].map(alias => `${alias}.${baseDomain}`).sort();
+  let entryAlias;
+  try {
+    entryAlias = resolveUnifiedEntryAlias(projects);
+  } catch (error) {
+    throw new CliError('INVALID_CONFIG', safeMessage(error));
+  }
+
+  const expectedDomains = [...projects]
+    .map(([semanticAlias, project]) => {
+      const hostnameAlias = getProjectHostnameAlias(semanticAlias, project);
+      return hostnameAlias ? `${hostnameAlias}.${baseDomain}` : baseDomain;
+    })
+    .sort();
   const healthDomains = [...projects]
     .filter(([, project]) => project.entryAccess.mode !== 'required')
-    .map(([alias]) => `${alias}.${baseDomain}`)
+    .map(([semanticAlias, project]) => {
+      const hostnameAlias = getProjectHostnameAlias(semanticAlias, project);
+      return hostnameAlias ? `${hostnameAlias}.${baseDomain}` : baseDomain;
+    })
     .sort();
   const customDomains = value.worker?.customDomains;
   if (
@@ -323,6 +347,7 @@ function validateVariablesFile(value) {
     workerName,
     rateLimitNamespaceId,
     vars,
+    entryAlias,
     secrets,
     customDomains: expectedDomains,
     healthDomains,

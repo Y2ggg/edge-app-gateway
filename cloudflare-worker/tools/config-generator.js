@@ -73,6 +73,7 @@ for (const button of document.querySelectorAll('[data-result-tab]')) {
 
 document.querySelector('#base-domain').addEventListener('input', () => {
   syncAllHostnames();
+  refreshUnifiedEntrySelectors();
   markOutputsStale();
 });
 
@@ -112,7 +113,10 @@ document.querySelector('#projects-container').addEventListener('input', event =>
   const card = event.target.closest('[data-project]');
   if (!card) return;
 
-  if (event.target.matches('[data-field="alias"]')) syncProjectHostname(card);
+  if (event.target.matches('[data-field="alias"], [data-field="semantic-alias"]')) {
+    syncProjectHostname(card);
+    refreshUnifiedEntrySelectors();
+  }
   markOutputsStale();
 });
 
@@ -121,6 +125,11 @@ document.querySelector('#projects-container').addEventListener('change', event =
   if (!card) return;
 
   if (event.target.matches('[data-field="edge-access"]')) syncProjectEdgeFields(card);
+  if (event.target.matches('[data-field="application-role"]')) {
+    syncProjectIdentityFields(card);
+    syncProjectHostname(card);
+    refreshUnifiedEntrySelectors();
+  }
   if (event.target.matches('[data-field="entry-access"]')) syncProjectEntryFields(card);
   if (event.target.matches('[data-field="delivery-mode"], [data-field="proxy-profile"], [data-field="origin-protection"]')) {
     syncProjectOptions(card, event.target.dataset.field);
@@ -145,6 +154,7 @@ document.querySelector('#projects-container').addEventListener('click', event =>
       selectProject(remaining[Math.min(removedIndex, remaining.length - 1)]);
     }
     updateProjectTitles();
+    refreshUnifiedEntrySelectors();
     markOutputsStale();
   }
 });
@@ -205,12 +215,18 @@ function addProject(initial = {}) {
   card.dataset.projectId = String(++projectSequence);
   const route = initial.route || {};
 
-  projectField(card, 'alias').value = initial.alias || '';
+  projectField(card, 'semantic-alias').value = initial.semanticAlias || route.semanticAlias || initial.alias || '';
+  projectField(card, 'application-role').value = route.isUnifiedEntry === true ? 'entry' : 'ordinary';
+  projectField(card, 'alias').value = route.hostnameAlias || (
+    route.isUnifiedEntry === true ? '' : initial.alias || ''
+  );
   projectField(card, 'target').value = route.target || '';
   projectField(card, 'edge-access').value = route.edgeAccess?.mode || 'disabled';
   projectField(card, 'password-hash').value = route.edgeAccess?.passwordHash || '';
   projectField(card, 'entry-access').value = route.entryAccess?.mode || 'disabled';
-  projectField(card, 'entry-alias').value = route.entryAccess?.entryAlias || '';
+  const entryAlias = route.entryAccess?.entryAlias || '';
+  projectField(card, 'entry-alias').value = entryAlias;
+  projectField(card, 'entry-alias').dataset.pendingValue = entryAlias;
   projectField(card, 'entry-ttl').value = String(route.entryAccess?.ttlSeconds || 1800);
   projectField(card, 'delivery-mode').value = route.deliveryMode || 'proxy';
   projectField(card, 'proxy-profile').value = route.proxyProfile || 'fullstack';
@@ -233,9 +249,11 @@ function addProject(initial = {}) {
 
   document.querySelector('#projects-container').append(card);
   syncProjectEdgeFields(card);
+  syncProjectIdentityFields(card);
   syncProjectEntryFields(card);
   syncProjectOptions(card);
   syncProjectHostname(card);
+  refreshUnifiedEntrySelectors();
   updateProjectTitles();
   selectProject(card);
   return card;
@@ -255,8 +273,9 @@ function updateProjectTitles() {
   }
 
   for (const [index, card] of cards.entries()) {
+    const semanticAlias = projectField(card, 'semantic-alias').value.trim();
     const alias = projectField(card, 'alias').value.trim();
-    const title = alias || `应用 ${index + 1}`;
+    const title = semanticAlias || alias || `应用 ${index + 1}`;
     card.querySelector('[data-role="project-title"]').textContent = title;
     card.dataset.active = String(card.dataset.projectId === selectedProjectId);
 
@@ -268,7 +287,10 @@ function updateProjectTitles() {
     const name = document.createElement('strong');
     name.textContent = title;
     const summary = document.createElement('small');
-    summary.textContent = alias ? projectHostname(card) : 'Alias 尚未填写';
+    const role = projectField(card, 'application-role').value === 'entry'
+      ? '统一入口应用'
+      : '普通应用';
+    summary.textContent = `${role} · ${projectHostname(card)}`;
     button.append(name, summary);
     list.append(button);
   }
@@ -285,8 +307,13 @@ function selectProject(project) {
 
 function projectHostname(card) {
   const alias = projectField(card, 'alias').value.trim().toLowerCase();
+  const semanticAlias = projectField(card, 'semantic-alias').value.trim().toLowerCase();
+  const isEntry = projectField(card, 'application-role').value === 'entry';
   const baseDomain = document.querySelector('#base-domain').value.trim().toLowerCase();
-  return alias && baseDomain ? `${alias}.${baseDomain}` : '等待基础域名';
+  if (!baseDomain) return '等待填写基础域名';
+  if (isEntry && !alias) return `${baseDomain}（统一入口）`;
+  if (alias) return `${alias}.${baseDomain}`;
+  return semanticAlias ? '普通应用必须填写访问域名 Alias' : '等待填写语义化别名和 Alias';
 }
 
 function syncAllHostnames() {
@@ -295,10 +322,7 @@ function syncAllHostnames() {
 
 function syncProjectHostname(card) {
   const output = card.querySelector('[data-role="hostname"]');
-  const hostname = projectHostname(card);
-  output.textContent = hostname === '等待基础域名' || !projectField(card, 'alias').value.trim()
-    ? '等待填写 Alias 和基础域名'
-    : hostname;
+  output.textContent = projectHostname(card);
 
   updateProjectTitles();
 }
@@ -306,6 +330,68 @@ function syncProjectHostname(card) {
 function syncProjectEdgeFields(card) {
   const required = projectField(card, 'edge-access').value === 'required';
   card.querySelector('[data-role="edge-fields"]').hidden = !required;
+}
+
+function syncProjectIdentityFields(card) {
+  const isEntry = projectField(card, 'application-role').value === 'entry';
+  const aliasInput = projectField(card, 'alias');
+  const entryAccess = projectField(card, 'entry-access');
+  aliasInput.placeholder = isEntry ? '可留空，默认使用基础域名' : 'smartdata';
+  card.querySelector('[data-role="alias-help"]').textContent = isEntry
+    ? '统一入口应用可留空，最终直接使用基础域名；填写后使用 Alias.基础域名。'
+    : '普通应用必须填写，最终域名为 Alias.基础域名。';
+
+  entryAccess.disabled = isEntry;
+  if (isEntry && entryAccess.value !== 'disabled') {
+    entryAccess.value = 'disabled';
+    syncProjectEntryFields(card);
+  }
+}
+
+function refreshUnifiedEntrySelectors() {
+  const cards = [...document.querySelectorAll('[data-project]')];
+  const entries = cards
+    .map(card => ({
+      semanticAlias: projectField(card, 'semantic-alias').value.trim().toLowerCase(),
+      hostnameAlias: projectField(card, 'alias').value.trim().toLowerCase(),
+      isEntry: projectField(card, 'application-role').value === 'entry'
+    }))
+    .filter(entry => entry.isEntry && entry.semanticAlias);
+
+  for (const card of cards) {
+    const select = projectField(card, 'entry-alias');
+    const currentValue = select.value || select.dataset.pendingValue || '';
+    select.replaceChildren();
+
+    if (!entries.length) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '请先配置统一入口应用';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      select.append(placeholder);
+      continue;
+    }
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '请选择统一入口';
+    select.append(placeholder);
+
+    for (const entry of entries) {
+      const option = document.createElement('option');
+      option.value = entry.semanticAlias;
+      option.textContent = entry.hostnameAlias
+        ? `${entry.semanticAlias}（${entry.hostnameAlias}.${document.querySelector('#base-domain').value.trim().toLowerCase() || '基础域名'}）`
+        : `${entry.semanticAlias}（基础域名）`;
+      select.append(option);
+    }
+
+    select.value = entries.some(entry => entry.semanticAlias === currentValue)
+      ? currentValue
+      : '';
+    delete select.dataset.pendingValue;
+  }
 }
 
 function syncProjectEntryFields(card) {
@@ -414,9 +500,11 @@ async function generateAndRender() {
     const generated = await generateProductionConfiguration();
     latestGenerated = generated;
     renderGeneratedConfiguration(generated);
+    const generatedProjects = parseProjects(generated.routeJson);
     setVerificationConfiguration({
       baseDomain: generated.vars.ROUTE_BASE_DOMAIN,
-      projects: parseProjects(generated.routeJson),
+      entryAlias: resolveUnifiedEntryAlias(generatedProjects),
+      projects: generatedProjects,
       sessionSecret: generated.secrets.ROUTE_SESSION_SECRET || '',
       source: '最近生成的完整配置'
     });
@@ -456,11 +544,15 @@ async function generateProductionConfiguration() {
     throw new Error('应用数量必须是 1–200 个。');
   }
 
-  const requiredCards = cards.filter(card => projectField(card, 'edge-access').value === 'required');
+  const requiredCards = cards.filter(card => (
+    projectField(card, 'edge-access').value === 'required' ||
+    projectField(card, 'entry-access').value === 'required'
+  ));
   let sessionSecret = readValue('#session-secret');
 
   if (requiredCards.length && !sessionSecret) {
     const hashWithoutPassword = requiredCards.find(card => (
+      projectField(card, 'edge-access').value === 'required' &&
       projectField(card, 'password-hash').value.trim() && !projectField(card, 'password').value
     ));
     if (hashWithoutPassword) {
@@ -473,23 +565,35 @@ async function generateProductionConfiguration() {
   }
 
   if (requiredCards.length && sessionSecret.length < 32) {
-    throw new Error('启用 Edge 登录时，ROUTE_SESSION_SECRET 至少需要 32 个字符。');
+    throw new Error('启用 Edge 登录或统一入口通行时，ROUTE_SESSION_SECRET 至少需要 32 个字符。');
   }
 
   const projects = {};
   const originSecrets = {};
   const bindingOwners = new Map();
+  const hostnameOwners = new Map();
   const wafSecrets = [];
 
   for (const [index, card] of cards.entries()) {
     const displayIndex = index + 1;
-    const alias = projectField(card, 'alias').value.trim();
+    const semanticAlias = projectField(card, 'semantic-alias').value.trim().toLowerCase();
+    const applicationRole = projectField(card, 'application-role').value;
+    const alias = projectField(card, 'alias').value.trim().toLowerCase();
 
-    if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(alias)) {
-      throw new Error(`应用 ${displayIndex} 的 Alias 必须是 3–63 位小写字母、数字或短横线。`);
+    if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(semanticAlias)) {
+      throw new Error(`应用 ${displayIndex} 的语义化别名必须是 3–63 位小写字母、数字或短横线。`);
     }
 
-    if (projects[alias]) throw new Error(`Alias“${alias}”重复。`);
+    if (projects[semanticAlias]) throw new Error(`语义化别名“${semanticAlias}”重复。`);
+    if (!['ordinary', 'entry'].includes(applicationRole)) {
+      throw new Error(`应用“${semanticAlias}”的应用角色无效。`);
+    }
+    if (applicationRole === 'ordinary' && !/^[a-z0-9][a-z0-9-]{2,62}$/.test(alias)) {
+      throw new Error(`普通应用“${semanticAlias}”必须填写有效的访问域名 Alias。`);
+    }
+    if (applicationRole === 'entry' && alias && !/^[a-z0-9][a-z0-9-]{2,62}$/.test(alias)) {
+      throw new Error(`统一入口应用“${semanticAlias}”的访问域名 Alias 无效。`);
+    }
 
     const target = parseTarget(projectField(card, 'target').value.trim());
     const deliveryMode = projectField(card, 'delivery-mode').value;
@@ -521,7 +625,7 @@ async function generateProductionConfiguration() {
           selectProject(card);
           status.dataset.error = 'true';
           status.textContent = 'Gateway 密码不能超过 256 个字符。';
-          throw new Error(`应用“${alias}”的 Gateway 密码不能超过 256 个字符。`);
+          throw new Error(`应用“${semanticAlias}”的 Gateway 密码不能超过 256 个字符。`);
         }
         passwordHash = await createPasswordHash(passwordInput.value, sessionSecret);
         projectField(card, 'password-hash').value = passwordHash;
@@ -532,7 +636,7 @@ async function generateProductionConfiguration() {
         selectProject(card);
         status.dataset.error = 'true';
         status.textContent = '请输入 Gateway 访问密码。';
-        throw new Error(`应用“${alias}”启用了 Edge 登录，请输入 Gateway 访问密码。`);
+        throw new Error(`应用“${semanticAlias}”启用了 Edge 登录，请输入 Gateway 访问密码。`);
       } else {
         status.dataset.error = 'false';
         status.textContent = '继续使用已有 passwordHash。';
@@ -541,7 +645,7 @@ async function generateProductionConfiguration() {
       validatePasswordHash(passwordHash);
       edgeAccess.passwordHash = passwordHash;
     } else if (edgeAccessMode !== 'disabled') {
-      throw new Error(`应用“${alias}”的 Edge Access 模式无效。`);
+      throw new Error(`应用“${semanticAlias}”的 Edge Access 模式无效。`);
     }
 
     const entryAccess = { mode: entryAccessMode };
@@ -551,25 +655,34 @@ async function generateProductionConfiguration() {
 
       if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(entryAlias)) {
         selectProject(card);
-        throw new Error(`应用“${alias}”的统一入口 Alias 无效。`);
+        throw new Error(`应用“${semanticAlias}”的统一入口语义化别名无效。`);
       }
       if (!Number.isInteger(entryTtlSeconds) || entryTtlSeconds < 300 || entryTtlSeconds > 86400) {
         selectProject(card);
-        throw new Error(`应用“${alias}”的入口通行有效期必须是 300–86400 之间的整数。`);
+        throw new Error(`应用“${semanticAlias}”的入口通行有效期必须是 300–86400 之间的整数。`);
       }
 
       entryAccess.entryAlias = entryAlias;
       entryAccess.ttlSeconds = entryTtlSeconds;
     } else if (entryAccessMode !== 'disabled') {
-      throw new Error(`应用“${alias}”的统一入口模式无效。`);
+      throw new Error(`应用“${semanticAlias}”的统一入口模式无效。`);
     }
 
     const originProtection = { mode: originProtectionMode };
-    const hostname = `${alias}.${baseDomain}`;
+    const hostnameAlias = alias;
+    const hostname = hostnameAlias ? `${hostnameAlias}.${baseDomain}` : baseDomain;
+
+    if (hostnameAlias) {
+      const existingOwner = hostnameOwners.get(hostnameAlias);
+      if (existingOwner && existingOwner !== semanticAlias) {
+        throw new Error(`应用“${semanticAlias}”与“${existingOwner}”使用了重复的访问域名 Alias。`);
+      }
+      hostnameOwners.set(hostnameAlias, semanticAlias);
+    }
 
     if (originProtectionMode === 'required') {
       const headerName = projectField(card, 'origin-header').value.trim().toLowerCase();
-      const defaultBinding = `ORIGIN_SECRET_${alias.replaceAll('-', '_').toUpperCase()}`;
+      const defaultBinding = `ORIGIN_SECRET_${semanticAlias.replaceAll('-', '_').toUpperCase()}`;
       const secretBinding = projectField(card, 'secret-binding').value.trim() || defaultBinding;
       let originSecret = projectField(card, 'origin-secret').value.trim();
 
@@ -577,7 +690,7 @@ async function generateProductionConfiguration() {
       validateBindingName(secretBinding);
 
       if (bindingOwners.has(secretBinding)) {
-        throw new Error(`应用“${alias}”与“${bindingOwners.get(secretBinding)}”使用了重复的 Secret Binding。`);
+        throw new Error(`应用“${semanticAlias}”与“${bindingOwners.get(secretBinding)}”使用了重复的 Secret Binding。`);
       }
 
       if (!originSecret) {
@@ -586,20 +699,23 @@ async function generateProductionConfiguration() {
       }
 
       if (originSecret.length < 16) {
-        throw new Error(`应用“${alias}”的 Origin Secret 至少需要 16 个字符。`);
+        throw new Error(`应用“${semanticAlias}”的 Origin Secret 至少需要 16 个字符。`);
       }
 
       projectField(card, 'secret-binding').value = secretBinding;
-      bindingOwners.set(secretBinding, alias);
+      bindingOwners.set(secretBinding, semanticAlias);
       originProtection.headerName = headerName;
       originProtection.secretBinding = secretBinding;
       originSecrets[secretBinding] = originSecret;
-      wafSecrets.push({ alias, hostname, headerName, secretBinding, secret: originSecret });
+      wafSecrets.push({ alias: semanticAlias, hostname, headerName, secretBinding, secret: originSecret });
     } else if (originProtectionMode !== 'disabled') {
-      throw new Error(`应用“${alias}”的源站保护模式无效。`);
+      throw new Error(`应用“${semanticAlias}”的源站保护模式无效。`);
     }
 
-    projects[alias] = {
+    projects[semanticAlias] = {
+      semanticAlias,
+      isUnifiedEntry: applicationRole === 'entry',
+      ...(hostnameAlias ? { hostnameAlias } : {}),
       target,
       deliveryMode,
       proxyProfile,
@@ -613,7 +729,9 @@ async function generateProductionConfiguration() {
     };
   }
 
+  validateProjectIdentity(projects);
   validateEntryAccessRelationships(projects);
+  resolveUnifiedEntryAlias(projects);
 
   const routeJson = JSON.stringify(projects);
   const secrets = { ROUTE_PROJECTS_JSON: routeJson };
@@ -628,15 +746,17 @@ async function generateProductionConfiguration() {
     ROUTE_BASE_DOMAIN: baseDomain,
     ROUTE_SESSION_TTL_SECONDS: String(ttlSeconds)
   };
-  const customDomains = Object.keys(projects).map(alias => `${alias}.${baseDomain}`);
+  const customDomains = Object.keys(projects)
+    .map(semanticAlias => getProjectHostname(semanticAlias, projects, baseDomain));
+  customDomains.sort();
   const entryLaunchLinks = Object.entries(projects)
     .filter(([, project]) => project.entryAccess.mode === 'required')
     .map(([alias, project]) => {
       const launchUrl = new URL(
         '/_edge-gateway/launch',
-        `https://${project.entryAccess.entryAlias}.${baseDomain}`
+        `https://${getProjectHostname(project.entryAccess.entryAlias, projects, baseDomain)}`
       );
-      launchUrl.searchParams.set('target', `${alias}.${baseDomain}`);
+      launchUrl.searchParams.set('target', getProjectHostname(alias, projects, baseDomain));
       return { alias, entryAlias: project.entryAccess.entryAlias, url: launchUrl.toString() };
     });
   const variablesFileName = `${workerName}.production.variables.json`;
@@ -664,7 +784,7 @@ async function generateProductionConfiguration() {
   const deployCommand = deployCommandPrefix;
   const healthCheckDomains = Object.entries(projects)
     .filter(([, project]) => project.entryAccess.mode !== 'required')
-    .map(([alias]) => `${alias}.${baseDomain}`);
+    .map(([semanticAlias]) => getProjectHostname(semanticAlias, projects, baseDomain));
   const healthCheckCommands = healthCheckDomains
     .map(domain => `curl -fsS ${shellQuote(`https://${domain}/_edge-gateway/health`)}`)
     .join('\n');
@@ -871,10 +991,12 @@ async function importVariablesFile(file) {
   for (const project of imported.projects) addProject(project);
 
   syncAllHostnames();
+  refreshUnifiedEntrySelectors();
   selectProject(document.querySelector('[data-project]'));
   markOutputsStale();
   setVerificationConfiguration({
     baseDomain: imported.baseDomain,
+    entryAlias: imported.entryAlias,
     projects: Object.fromEntries(imported.projects.map(project => [project.alias, project.route])),
     sessionSecret: imported.sessionSecret,
     source: `已导入的变量文件（${imported.projects.length} 个应用）`
@@ -911,7 +1033,20 @@ function validateVariablesFile(value) {
     workerName
   );
 
-  const baseDomain = parseBaseDomain(String(value.vars?.ROUTE_BASE_DOMAIN || ''), true);
+  const rawVars = value.vars;
+  if (!rawVars || Array.isArray(rawVars) || typeof rawVars !== 'object') {
+    throw new Error('变量文件缺少 vars 对象。');
+  }
+  const variableNames = Object.keys(rawVars);
+  if (
+    variableNames.some(name => !['ROUTE_BASE_DOMAIN', 'ROUTE_SESSION_TTL_SECONDS'].includes(name)) ||
+    variableNames.length !== 2 ||
+    variableNames.some(name => typeof rawVars[name] !== 'string')
+  ) {
+    throw new Error('vars 必须只包含基础域名和 Session 有效期。');
+  }
+
+  const baseDomain = parseBaseDomain(rawVars.ROUTE_BASE_DOMAIN, true);
   const ttlSeconds = Number(value.vars?.ROUTE_SESSION_TTL_SECONDS);
   if (!Number.isInteger(ttlSeconds) || ttlSeconds < 300 || ttlSeconds > 604800) {
     throw new Error('变量文件中的 Session 有效期无效。');
@@ -949,18 +1084,30 @@ function validateVariablesFile(value) {
       }
     }
 
-    if (route.edgeAccess.mode === 'required') needsSessionSecret = true;
-    importedProjects.push({ alias, route, originSecret });
+    if (route.edgeAccess.mode === 'required' || route.entryAccess.mode === 'required') {
+      needsSessionSecret = true;
+    }
+    importedProjects.push({
+      alias,
+      semanticAlias: route.semanticAlias || alias,
+      route,
+      originSecret
+    });
   }
 
+  validateProjectIdentity(projects);
   validateEntryAccessRelationships(projects);
+
+  const entryAlias = resolveUnifiedEntryAlias(projects);
 
   const sessionSecret = String(secrets.ROUTE_SESSION_SECRET || '');
   if (needsSessionSecret && sessionSecret.length < 32) {
-    throw new Error('变量文件缺少有效的 ROUTE_SESSION_SECRET。');
+    throw new Error('变量文件缺少有效的 ROUTE_SESSION_SECRET（启用 Edge 登录或统一入口通行时必需）。');
   }
 
-  const expectedDomains = entries.map(([alias]) => `${alias}.${baseDomain}`).sort();
+  const expectedDomains = entries.map(([semanticAlias, project]) => {
+    return getProjectHostname(semanticAlias, projects, baseDomain);
+  }).sort();
   const customDomains = value.worker?.customDomains;
   if (!Array.isArray(customDomains) || customDomains.some(domain => typeof domain !== 'string')) {
     throw new Error('变量文件缺少 Custom Domains 数组。');
@@ -975,6 +1122,7 @@ function validateVariablesFile(value) {
     workerName,
     rateLimitNamespaceId,
     baseDomain,
+    entryAlias,
     ttlSeconds,
     sessionSecret,
     projects: importedProjects
@@ -994,14 +1142,24 @@ async function verifyExistingConfiguration() {
 
     const hostname = parseHostname(document.querySelector('#verify-hostname').value);
     const { baseDomain, projects, sessionSecret } = verificationConfiguration;
+    const configuredEntryAlias = verificationConfiguration.entryAlias || '';
 
-    if (!hostname.endsWith(`.${baseDomain}`)) {
+    if (hostname !== baseDomain && !hostname.endsWith(`.${baseDomain}`)) {
       throw new Error(`访问域名不属于当前配置的基础域名：${baseDomain}`);
     }
-    const alias = hostname.slice(0, -(baseDomain.length + 1));
+    const baseEntryAlias = configuredEntryAlias &&
+      projects[configuredEntryAlias]?.isUnifiedEntry === true &&
+      !getProjectHostnameAliasForGenerator(configuredEntryAlias, projects[configuredEntryAlias])
+      ? configuredEntryAlias
+      : '';
+    const alias = hostname === baseDomain
+      ? baseEntryAlias
+      : Object.entries(projects).find(([semanticAlias]) => (
+        getProjectHostname(semanticAlias, projects, baseDomain) === hostname
+      ))?.[0] || '';
 
-    const project = projects[alias];
-    if (!project) throw new Error(`当前配置中不存在域名前缀“${alias}”对应的应用。`);
+    const project = alias ? projects[alias] : null;
+    if (!project) throw new Error('当前配置未设置基础域名统一入口，或不存在对应应用。');
     validateProject(project);
     validateEntryAccessRelationships(projects);
 
@@ -1059,6 +1217,16 @@ function validateProject(project) {
   }
 
   parseTarget(project.target);
+  if (project.semanticAlias !== undefined && !/^[a-z0-9][a-z0-9-]{2,62}$/.test(project.semanticAlias)) {
+    throw new Error('semanticAlias 必须是有效别名。');
+  }
+  if (project.isUnifiedEntry !== undefined && typeof project.isUnifiedEntry !== 'boolean') {
+    throw new Error('isUnifiedEntry 必须是布尔值。');
+  }
+  if (project.hostnameAlias !== undefined && project.hostnameAlias !== '' &&
+    !/^[a-z0-9][a-z0-9-]{2,62}$/.test(project.hostnameAlias)) {
+    throw new Error('hostnameAlias 必须是有效别名。');
+  }
   const requestOriginPolicy = project.requestOriginPolicy === undefined
     ? 'preserve'
     : project.requestOriginPolicy;
@@ -1111,6 +1279,38 @@ function validateProject(project) {
   });
 }
 
+function validateProjectIdentity(projects) {
+  const unifiedEntries = Object.entries(projects)
+    .filter(([, project]) => project.isUnifiedEntry === true);
+  if (unifiedEntries.length > 1) throw new Error('只能配置一个统一入口应用。');
+
+  const hostnameOwners = new Map();
+
+  for (const [semanticAlias, project] of Object.entries(projects)) {
+    const isEntry = project.isUnifiedEntry === true;
+    if (project.semanticAlias !== undefined && project.semanticAlias !== semanticAlias) {
+      throw new Error(`应用“${semanticAlias}”的语义化别名必须与配置键一致。`);
+    }
+    const hostnameAlias = getProjectHostnameAliasForGenerator(semanticAlias, project);
+    if (!isEntry && project.isUnifiedEntry === false && !hostnameAlias) {
+      throw new Error(`普通应用“${semanticAlias}”必须填写访问域名 Alias。`);
+    }
+    if (isEntry && project.entryAccess?.mode !== 'disabled') {
+      throw new Error(`统一入口应用“${semanticAlias}”不能再依赖其他统一入口。`);
+    }
+    if (isEntry && project.deliveryMode !== 'proxy') {
+      throw new Error(`统一入口应用“${semanticAlias}”必须使用反向代理。`);
+    }
+    if (hostnameAlias) {
+      const existingOwner = hostnameOwners.get(hostnameAlias);
+      if (existingOwner && existingOwner !== semanticAlias) {
+        throw new Error(`应用“${semanticAlias}”与“${existingOwner}”使用了重复的访问域名 Alias。`);
+      }
+      hostnameOwners.set(hostnameAlias, semanticAlias);
+    }
+  }
+}
+
 function validateEntryAccessRelationships(projects) {
   for (const [alias, project] of Object.entries(projects)) {
     const entryAccess = project.entryAccess === undefined
@@ -1125,13 +1325,35 @@ function validateEntryAccessRelationships(projects) {
     if (project.deliveryMode !== 'proxy' || entryProject.deliveryMode !== 'proxy') {
       throw new Error(`应用“${alias}”及其统一入口“${entryAccess.entryAlias}”都必须使用反向代理。`);
     }
-    if (entryProject.edgeAccess?.mode !== 'required') {
-      throw new Error(`统一入口“${entryAccess.entryAlias}”必须启用 Gateway 密码登录。`);
+    if (entryProject.isUnifiedEntry !== true) {
+      throw new Error(`应用“${entryAccess.entryAlias}”必须标记为统一入口应用。`);
     }
     if ((entryProject.entryAccess?.mode || 'disabled') !== 'disabled') {
       throw new Error(`统一入口“${entryAccess.entryAlias}”不能再依赖其他统一入口。`);
     }
   }
+}
+
+function resolveUnifiedEntryAlias(projects) {
+  const entries = Object.entries(projects)
+    .filter(([, project]) => project.isUnifiedEntry === true);
+  if (entries.length > 1) throw new Error('只能配置一个统一入口应用。');
+  return entries[0]?.[0] || '';
+}
+
+function getProjectHostname(semanticAlias, projects, baseDomain) {
+  const project = projects[semanticAlias];
+  const hostnameAlias = getProjectHostnameAliasForGenerator(semanticAlias, project);
+  if (!hostnameAlias) return baseDomain;
+  return `${hostnameAlias}.${baseDomain}`;
+}
+
+function getProjectHostnameAliasForGenerator(semanticAlias, project) {
+  if (project && Object.prototype.hasOwnProperty.call(project, 'hostnameAlias')) {
+    return project.hostnameAlias;
+  }
+  if (project?.isUnifiedEntry === true) return '';
+  return project?.isUnifiedEntry === undefined ? semanticAlias : '';
 }
 
 function validateDeliveryOptions({

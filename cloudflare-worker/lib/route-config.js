@@ -41,6 +41,40 @@ export function isValidRouteAlias(alias) {
   return typeof alias === 'string' && ROUTE_ALIAS_PATTERN.test(alias);
 }
 
+/**
+ * Resolve the application that should receive requests sent to the bare
+ * ROUTE_BASE_DOMAIN (the gateway's unified entry host).
+ *
+ * The bare base-domain route is opt-in. An alias must be configured explicitly
+ * so adding a new entryAccess relationship can never silently expose a new
+ * public host.
+ */
+export function resolveUnifiedEntryAlias(projects) {
+  if (!(projects instanceof Map)) {
+    throw new RouteConfigurationError('Projects must be a Map');
+  }
+
+  const entries = [...projects]
+    .filter(([, project]) => project.isUnifiedEntry === true);
+
+  if (entries.length > 1) {
+    throw new RouteConfigurationError('只能配置一个统一入口应用');
+  }
+
+  const [semanticAlias, project] = entries[0] || [];
+  return project ? semanticAlias : '';
+}
+
+export function getProjectHostnameAlias(semanticAlias, project) {
+  if (project && Object.prototype.hasOwnProperty.call(project, 'hostnameAlias')) {
+    return project.hostnameAlias;
+  }
+  if (project?.isUnifiedEntry === true) return '';
+  // Keep reading pre-role configurations during a gradual migration. New
+  // configurations always persist hostnameAlias explicitly for ordinary apps.
+  return project?.isUnifiedEntry === undefined ? semanticAlias : '';
+}
+
 export function parseRouteProjects(rawConfig) {
   if (typeof rawConfig !== 'string' || rawConfig.length === 0) {
     throw new RouteConfigurationError('ROUTE_PROJECTS_JSON is missing');
@@ -70,6 +104,7 @@ export function parseRouteProjects(rawConfig) {
     projects.set(alias, parseProject(alias, rawProject));
   }
 
+  validateProjectIdentity(projects);
   validateEntryAccessRelationships(projects);
 
   return projects;
@@ -85,6 +120,19 @@ function parseProject(alias, project) {
   }
 
   const target = parseTarget(alias, project.target);
+  const isUnifiedEntry = project.isUnifiedEntry === true;
+  if (project.isUnifiedEntry !== undefined && typeof project.isUnifiedEntry !== 'boolean') {
+    throw new RouteConfigurationError(`Application ${alias} isUnifiedEntry must be boolean`);
+  }
+  const hostnameAlias = project.hostnameAlias === undefined
+    ? ''
+    : project.hostnameAlias;
+  if (typeof hostnameAlias !== 'string') {
+    throw new RouteConfigurationError(`Application ${alias} hostnameAlias must be a string`);
+  }
+  if (hostnameAlias && !isValidRouteAlias(hostnameAlias)) {
+    throw new RouteConfigurationError(`Application ${alias} hostnameAlias must be a valid route alias`);
+  }
   const deliveryMode = requireEnum(alias, 'deliveryMode', project.deliveryMode, ['proxy', 'redirect']);
   const proxyProfile = requireEnum(alias, 'proxyProfile', project.proxyProfile, ['static', 'fullstack']);
   const requestOriginPolicy = project.requestOriginPolicy === undefined
@@ -124,7 +172,7 @@ function parseProject(alias, project) {
     );
   }
 
-  return Object.freeze({
+  const normalized = {
     target,
     deliveryMode,
     proxyProfile,
@@ -135,7 +183,65 @@ function parseProject(alias, project) {
     allowedMethods,
     cachePolicy,
     cookieDomainPolicy
-  });
+  };
+
+  if (project.isUnifiedEntry !== undefined) normalized.isUnifiedEntry = isUnifiedEntry;
+  if (project.hostnameAlias !== undefined) normalized.hostnameAlias = hostnameAlias;
+  if (project.semanticAlias !== undefined) {
+    if (project.semanticAlias !== alias || !isValidRouteAlias(project.semanticAlias)) {
+      throw new RouteConfigurationError(`Application ${alias} semanticAlias must match its route key`);
+    }
+    normalized.semanticAlias = project.semanticAlias;
+  }
+
+  return Object.freeze(normalized);
+}
+
+function validateProjectIdentity(projects) {
+  const unifiedEntries = [];
+  const hostnameOwners = new Map();
+
+  for (const [semanticAlias, project] of projects) {
+    const isUnifiedEntry = project.isUnifiedEntry === true;
+    const hostnameAlias = getProjectHostnameAlias(semanticAlias, project);
+
+    if (!isValidRouteAlias(semanticAlias)) {
+      throw new RouteConfigurationError(`Application ${semanticAlias} semanticAlias is invalid`);
+    }
+    if (isUnifiedEntry) unifiedEntries.push(semanticAlias);
+    // An explicitly classified ordinary application must declare its public
+    // hostname alias. The fallback below only serves legacy configs that did
+    // not yet have the isUnifiedEntry field at all.
+    if (!isUnifiedEntry && project.isUnifiedEntry === false && !hostnameAlias) {
+      throw new RouteConfigurationError(
+        `Application ${semanticAlias} requires an alias unless it is the unified entry application`
+      );
+    }
+    if (isUnifiedEntry && project.entryAccess.mode !== 'disabled') {
+      throw new RouteConfigurationError(
+        `Unified entry application ${semanticAlias} cannot require another entry application`
+      );
+    }
+    if (isUnifiedEntry && project.deliveryMode !== 'proxy') {
+      throw new RouteConfigurationError(
+        `Unified entry application ${semanticAlias} must use proxy delivery`
+      );
+    }
+
+    if (hostnameAlias) {
+      const existingOwner = hostnameOwners.get(hostnameAlias);
+      if (existingOwner && existingOwner !== semanticAlias) {
+        throw new RouteConfigurationError(
+          `Applications ${existingOwner} and ${semanticAlias} cannot use the same hostname alias ${hostnameAlias}`
+        );
+      }
+      hostnameOwners.set(hostnameAlias, semanticAlias);
+    }
+  }
+
+  if (unifiedEntries.length > 1) {
+    throw new RouteConfigurationError('只能配置一个统一入口应用');
+  }
 }
 
 function parseEntryAccess(alias, entryAccess) {
@@ -195,9 +301,9 @@ function validateEntryAccessRelationships(projects) {
       );
     }
 
-    if (entryProject.edgeAccess.mode !== 'required') {
+    if (entryProject.isUnifiedEntry !== true) {
       throw new RouteConfigurationError(
-        `Entry application ${project.entryAccess.entryAlias} must require Edge Access`
+        `Entry application ${project.entryAccess.entryAlias} must be marked as the unified entry application`
       );
     }
 
